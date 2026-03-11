@@ -19,6 +19,15 @@ from database import get_db_connection, update_balance
 
 logger = logging.getLogger(__name__)
 
+# Maps user_id -> guild_id: set when user runs /vote, used when webhook fires
+_vote_guild_map: dict[int, int] = {}
+
+
+def register_vote_guild(user_id: int, guild_id: int):
+    """Called from /vote command to remember which guild the user voted from."""
+    _vote_guild_map[user_id] = guild_id
+
+
 WEBHOOK_PORT = int(os.getenv('TOPGG_WEBHOOK_PORT', '5000'))
 WEBHOOK_AUTH = os.getenv('TOPGG_WEBHOOK_AUTH', '')
 
@@ -183,23 +192,31 @@ class TopggCog(commands.Cog):
         day_in_cycle = ((total - 1) % 30) + 1
         reward = get_vote_reward_for_day(day_in_cycle)
 
-        notified = False
-        for guild in self.bot.guilds:
-            member = guild.get_member(user_id)
-            if not member:
-                continue
+        # Use the guild the user ran /vote in; fall back to first shared guild
+        target_guild_id = _vote_guild_map.pop(user_id, None)
 
-            update_balance(guild.id, user_id, reward['coins'])
-            _give_pack(guild.id, user_id, reward['pack'])
-            if is_weekend:
-                _give_pack(guild.id, user_id, VOTE_WEEKEND_BONUS_PACK)
+        member = None
+        if target_guild_id:
+            guild = self.bot.get_guild(target_guild_id)
+            if guild:
+                member = guild.get_member(user_id)
 
-            if not notified:
-                notified = True
-                await self._notify(member, reward, day_in_cycle, streak, total, is_weekend, is_test)
+        if member is None:
+            for guild in self.bot.guilds:
+                member = guild.get_member(user_id)
+                if member:
+                    break
 
-        if not notified:
+        if member is None:
             logger.info(f"Vote for user {user_id} — not in any shared guild.")
+            return
+
+        update_balance(member.guild.id, user_id, reward['coins'])
+        _give_pack(member.guild.id, user_id, reward['pack'])
+        if is_weekend:
+            _give_pack(member.guild.id, user_id, VOTE_WEEKEND_BONUS_PACK)
+
+        await self._notify(member, reward, day_in_cycle, streak, total, is_weekend, is_test)
 
     async def _notify(self, user: discord.Member, reward: dict, day_in_cycle: int,
                       streak: int, total: int, is_weekend: bool, is_test: bool):

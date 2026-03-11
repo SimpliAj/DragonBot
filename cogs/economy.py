@@ -539,7 +539,8 @@ class EconomyCog(commands.Cog):
         await interaction.response.defer(ephemeral=False)
 
         from database import get_db_connection
-        from cogs.topgg import get_vote_reward_for_day, build_vote_schedule_rows
+        from cogs.topgg import get_vote_reward_for_day, build_vote_schedule_rows, register_vote_guild
+        register_vote_guild(interaction.user.id, interaction.guild.id)
 
         streak_info = {'current_streak': 0, 'total_votes': 0, 'best_streak': 0, 'last_vote_time': 0}
         try:
