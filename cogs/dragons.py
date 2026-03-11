@@ -420,7 +420,7 @@ class InventoryItemsView(discord.ui.View):
             return
 
         # Check if raid boss is active
-        from database import is_raid_boss_active
+        from utils import is_raid_boss_active
         if is_raid_boss_active(self.guild_id):
             await interaction.response.send_message("❌ Cannot activate dragonscale during an active raid boss! ⚔️", ephemeral=False)
             return

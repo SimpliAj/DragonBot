@@ -1722,10 +1722,10 @@ class TasksCog(commands.Cog):
                         if item_type == 'dragonscale':
                             # Calculate random duration for Dragonscale
                             item_duration_minutes = random.randint(item_data['min_duration'], item_data['max_duration'])
-                            # Add to inventory (user_dragonscales table)
-                            c.execute('''INSERT OR IGNORE INTO user_dragonscales (guild_id, user_id, minutes_available)
+                            # Add to inventory (dragonscales table)
+                            c.execute('''INSERT OR IGNORE INTO dragonscales (guild_id, user_id, minutes)
                                         VALUES (?, ?, ?)''', (guild_id, user_id, item_duration_minutes))
-                            c.execute('UPDATE user_dragonscales SET minutes_available = minutes_available + ? WHERE guild_id = ? AND user_id = ?',
+                            c.execute('UPDATE dragonscales SET minutes = minutes + ? WHERE guild_id = ? AND user_id = ?',
                                      (item_duration_minutes, guild_id, user_id))
 
                         elif item_type == 'lucky_charm':
