@@ -5,6 +5,7 @@ Extracted verbatim from bot.py.
 """
 
 import asyncio
+import random
 import sqlite3
 import time
 from datetime import datetime
@@ -15,7 +16,8 @@ from discord.ext import commands
 
 from config import (
     DRAGON_TYPES, DRAGON_RARITY_TIERS, DRAGONNEST_UPGRADES, LEVEL_NAMES,
-    PACK_TYPES, RARITY_DAMAGE, USABLE_ITEMS
+    PACK_TYPES, RARITY_DAMAGE, USABLE_ITEMS,
+    MYSTERY_BOX_POOL, DICE_OF_FATE_EFFECTS
 )
 from database import (
     get_user, update_balance, get_active_item, activate_item,
@@ -392,6 +394,12 @@ class InventoryItemsView(discord.ui.View):
                     self.add_item(self.create_night_vision_button(count))
                 elif item_key == 'lucky_dice':
                     self.add_item(self.create_lucky_dice_button(count))
+                elif item_key == 'mystery_box':
+                    self.add_item(self.create_mystery_box_button(count))
+                elif item_key == 'dice_of_fate':
+                    self.add_item(self.create_dice_of_fate_button(count))
+                elif item_key == 'gold_rush':
+                    self.add_item(self.create_gold_rush_button(count))
 
     def create_dragonscale_button(self):
         button = discord.ui.Button(
@@ -655,6 +663,246 @@ class InventoryItemsView(discord.ui.View):
                 pass  # Message might be deleted
 
         # Send the success message separately
+        await interaction.followup.send(embed=embed, ephemeral=False)
+
+    def create_mystery_box_button(self, count: int):
+        button = discord.ui.Button(
+            label=f"Open Mystery Box ({count}x)",
+            style=discord.ButtonStyle.success,
+            emoji="❓",
+            custom_id=f"mysterybox_{self.guild_id}_{self.user_id}"
+        )
+        button.callback = self.open_mystery_box
+        return button
+
+    def create_dice_of_fate_button(self, count: int):
+        button = discord.ui.Button(
+            label=f"Roll Dice of Fate ({count}x)",
+            style=discord.ButtonStyle.danger,
+            emoji="🎲",
+            custom_id=f"diceoffate_{self.guild_id}_{self.user_id}"
+        )
+        button.callback = self.roll_dice_of_fate
+        return button
+
+    async def open_mystery_box(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This is not your inventory!", ephemeral=False)
+            return
+
+        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        c = conn.cursor()
+        c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
+                  (self.guild_id, self.user_id, 'mystery_box'))
+        result = c.fetchone()
+        if not result or result[0] <= 0:
+            await interaction.response.send_message("❌ You don't have any Mystery Boxes!", ephemeral=False)
+            conn.close()
+            return
+
+        # Consume 1 box
+        c.execute('UPDATE user_items SET count = count - 1 WHERE guild_id = ? AND user_id = ? AND item_type = ?',
+                  (self.guild_id, self.user_id, 'mystery_box'))
+
+        # Roll the pool
+        weights = [entry['weight'] for entry in MYSTERY_BOX_POOL]
+        prize = random.choices(MYSTERY_BOX_POOL, weights=weights)[0]
+
+        prize_label = prize['label']
+        prize_emoji = prize['emoji']
+        description = ""
+
+        if prize['type'] == 'coins':
+            amount = random.randint(prize['amount'][0], prize['amount'][1])
+            c.execute('UPDATE users SET balance = balance + ? WHERE guild_id = ? AND user_id = ?',
+                      (amount, self.guild_id, self.user_id))
+            prize_label = prize_label.replace('{amount}', f'{amount:,}')
+            description = f"**+{amount:,}** coins added to your balance!"
+
+        elif prize['type'] == 'luckycharm':
+            c.execute('''INSERT INTO user_luckycharms (guild_id, user_id, count) VALUES (?, ?, 1)
+                         ON CONFLICT(guild_id, user_id) DO UPDATE SET count = count + 1''',
+                      (self.guild_id, self.user_id))
+            description = "A **Lucky Charm** has been added to your inventory!"
+
+        elif prize['type'] == 'item':
+            item_type = prize['item_type']
+            c.execute('''INSERT INTO user_items (guild_id, user_id, item_type, count) VALUES (?, ?, ?, 1)
+                         ON CONFLICT(guild_id, user_id, item_type) DO UPDATE SET count = count + 1''',
+                      (self.guild_id, self.user_id, item_type))
+            description = f"**{prize_label}** has been added to your inventory!"
+
+        elif prize['type'] == 'pack':
+            pack_type = prize['pack_type']
+            c.execute('''INSERT INTO user_packs (guild_id, user_id, pack_type, count) VALUES (?, ?, ?, 1)
+                         ON CONFLICT(guild_id, user_id, pack_type) DO UPDATE SET count = count + 1''',
+                      (self.guild_id, self.user_id, pack_type))
+            description = f"A **{prize_label}** has been added to your packs! Use `/openpacks`."
+
+        elif prize['type'] == 'dragonscale':
+            minutes = random.randint(prize['minutes'][0], prize['minutes'][1])
+            c.execute('''INSERT INTO dragonscales (guild_id, user_id, minutes) VALUES (?, ?, ?)
+                         ON CONFLICT(guild_id, user_id) DO UPDATE SET minutes = minutes + ?''',
+                      (self.guild_id, self.user_id, minutes, minutes))
+            prize_label = prize_label.replace('{minutes}', str(minutes))
+            description = f"**{minutes} minutes** of Dragonscale added to your inventory!"
+
+        conn.commit()
+        conn.close()
+
+        self.usable_items['mystery_box'] = self.usable_items.get('mystery_box', 1) - 1
+
+        embed = discord.Embed(
+            title="❓ Mystery Box Opened!",
+            description=f"{prize_emoji} **{prize_label}**\n\n{description}",
+            color=discord.Color.gold()
+        )
+
+        await interaction.response.defer()
+        if interaction.message:
+            new_view = InventoryItemsView(self.guild_id, self.user_id, self.dragonscale_minutes, self.luckycharm_count, self.usable_items)
+            try:
+                await interaction.message.edit(view=new_view)
+            except Exception:
+                pass
+        await interaction.followup.send(embed=embed, ephemeral=False)
+
+    def create_gold_rush_button(self, count: int):
+        button = discord.ui.Button(
+            label=f"Activate Gold Rush ({count}x)",
+            style=discord.ButtonStyle.primary,
+            emoji="✨",
+            custom_id=f"goldrush_{self.guild_id}_{self.user_id}"
+        )
+        button.callback = self.activate_gold_rush
+        return button
+
+    async def activate_gold_rush(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This is not your inventory!", ephemeral=False)
+            return
+
+        if get_active_item(self.guild_id, self.user_id, 'gold_rush'):
+            await interaction.response.send_message("⏳ Gold Rush is already active!", ephemeral=False)
+            return
+
+        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        c = conn.cursor()
+        c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
+                  (self.guild_id, self.user_id, 'gold_rush'))
+        result = c.fetchone()
+        if not result or result[0] <= 0:
+            await interaction.response.send_message("❌ You don't have any Gold Rush items!", ephemeral=False)
+            conn.close()
+            return
+
+        c.execute('UPDATE user_items SET count = count - 1 WHERE guild_id = ? AND user_id = ? AND item_type = ?',
+                  (self.guild_id, self.user_id, 'gold_rush'))
+        conn.commit()
+        conn.close()
+
+        activate_item(self.guild_id, self.user_id, 'gold_rush', 60 * 60)  # 1 hour
+
+        self.usable_items['gold_rush'] = self.usable_items.get('gold_rush', 1) - 1
+
+        embed = discord.Embed(
+            title="✨ Gold Rush Activated!",
+            description="**Duration:** 60 minutes\n"
+                        "**Effect:** +50% coin drops when catching dragons!\n"
+                        "Time to go catch some high-value dragons!",
+            color=discord.Color.gold()
+        )
+
+        await interaction.response.defer()
+        if interaction.message:
+            new_view = InventoryItemsView(self.guild_id, self.user_id, self.dragonscale_minutes, self.luckycharm_count, self.usable_items)
+            try:
+                await interaction.message.edit(view=new_view)
+            except Exception:
+                pass
+        await interaction.followup.send(embed=embed, ephemeral=False)
+
+    async def roll_dice_of_fate(self, interaction: discord.Interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ This is not your inventory!", ephemeral=False)
+            return
+
+        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        c = conn.cursor()
+        c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
+                  (self.guild_id, self.user_id, 'dice_of_fate'))
+        result = c.fetchone()
+        if not result or result[0] <= 0:
+            await interaction.response.send_message("❌ You don't have any Dice of Fate!", ephemeral=False)
+            conn.close()
+            return
+
+        # Consume 1 die
+        c.execute('UPDATE user_items SET count = count - 1 WHERE guild_id = ? AND user_id = ? AND item_type = ?',
+                  (self.guild_id, self.user_id, 'dice_of_fate'))
+
+        # Roll the effect pool
+        weights = [entry['weight'] for entry in DICE_OF_FATE_EFFECTS]
+        effect = random.choices(DICE_OF_FATE_EFFECTS, weights=weights)[0]
+
+        label = effect['label']
+        emoji = effect['emoji']
+
+        if effect['type'] == 'coins_gain':
+            amount = random.randint(effect['amount'][0], effect['amount'][1])
+            c.execute('UPDATE users SET balance = balance + ? WHERE guild_id = ? AND user_id = ?',
+                      (amount, self.guild_id, self.user_id))
+            label = label.replace('{amount}', f'{amount:,}')
+
+        elif effect['type'] == 'coins_loss':
+            amount = random.randint(effect['amount'][0], effect['amount'][1])
+            # Don't go below 0
+            c.execute('SELECT balance FROM users WHERE guild_id = ? AND user_id = ?',
+                      (self.guild_id, self.user_id))
+            bal_row = c.fetchone()
+            actual_loss = min(amount, int(bal_row[0])) if bal_row else 0
+            c.execute('UPDATE users SET balance = MAX(0, balance - ?) WHERE guild_id = ? AND user_id = ?',
+                      (actual_loss, self.guild_id, self.user_id))
+            label = label.replace('{amount}', f'{actual_loss:,}')
+
+        elif effect['type'] == 'luckycharm':
+            c.execute('''INSERT INTO user_luckycharms (guild_id, user_id, count) VALUES (?, ?, 1)
+                         ON CONFLICT(guild_id, user_id) DO UPDATE SET count = count + 1''',
+                      (self.guild_id, self.user_id))
+
+        elif effect['type'] == 'item':
+            item_type = effect['item_type']
+            c.execute('''INSERT INTO user_items (guild_id, user_id, item_type, count) VALUES (?, ?, ?, 1)
+                         ON CONFLICT(guild_id, user_id, item_type) DO UPDATE SET count = count + 1''',
+                      (self.guild_id, self.user_id, item_type))
+
+        elif effect['type'] == 'dragonscale':
+            minutes = random.randint(effect['minutes'][0], effect['minutes'][1])
+            c.execute('''INSERT INTO dragonscales (guild_id, user_id, minutes) VALUES (?, ?, ?)
+                         ON CONFLICT(guild_id, user_id) DO UPDATE SET minutes = minutes + ?''',
+                      (self.guild_id, self.user_id, minutes, minutes))
+            label = label.replace('{minutes}', str(minutes))
+
+        # 'nothing' type: no DB changes needed
+
+        conn.commit()
+        conn.close()
+
+        self.usable_items['dice_of_fate'] = self.usable_items.get('dice_of_fate', 1) - 1
+
+        embed = discord.Embed(
+            title="🎲 Dice of Fate Rolled!",
+            description=f"{emoji} {label}",
+            color=discord.Color.purple()
+        )
+
+        await interaction.response.defer()
+        if interaction.message:
+            new_view = InventoryItemsView(self.guild_id, self.user_id, self.dragonscale_minutes, self.luckycharm_count, self.usable_items)
+            try:
+                await interaction.message.edit(view=new_view)
+            except Exception:
+                pass
         await interaction.followup.send(embed=embed, ephemeral=False)
 
 
@@ -1106,8 +1354,13 @@ class DragonsCog(commands.Cog):
         luckycharm_count = luckycharm_result[0] if luckycharm_result else 0
 
         # Get new usable items counts
-        c.execute('SELECT item_type, count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type IN (?, ?, ?, ?)',
-                  (interaction.guild_id, target_user.id, 'dragon_magnet', 'night_vision', 'lucky_dice', 'dna'))
+        c.execute('''SELECT item_type, count FROM user_items
+                     WHERE guild_id = ? AND user_id = ?
+                     AND item_type IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (interaction.guild_id, target_user.id,
+                   'dragon_magnet', 'night_vision', 'lucky_dice', 'dna',
+                   'mystery_box', 'dice_of_fate', 'fast_travel_scroll', 'double_loot_bag',
+                   'gold_rush', 'war_drum', 'shield_rune', 'server_trophy'))
         usable_items_db = {item_type: count for item_type, count in c.fetchall()}
 
         # Get Packs
@@ -1194,6 +1447,21 @@ class DragonsCog(commands.Cog):
             count = usable_items_db.get(item_key, 0)
             if count > 0:
                 items_text += f"{data['emoji']} {data['name']}: {count}\n"
+
+        # Add consumable items
+        consumable_display = [
+            ('mystery_box',        '❓', 'Mystery Box'),
+            ('dice_of_fate',       '🎲', 'Dice of Fate'),
+            ('fast_travel_scroll', '📜', 'Fast Travel Scroll'),
+            ('double_loot_bag',    '🎒', 'Double Loot Bag'),
+            ('war_drum',           '🥁', 'War Drum'),
+            ('shield_rune',        '🔷', 'Shield Rune'),
+            ('server_trophy',      '🥇', 'Server Trophy'),
+        ]
+        for item_key, emoji, name in consumable_display:
+            count = usable_items_db.get(item_key, 0)
+            if count > 0:
+                items_text += f"{emoji} {name}: {count}\n"
 
         if packs:
             pack_text = "\n".join([f"{PACK_TYPES.get(pt, {'emoji': '📦'})['emoji']} `x{c:2}`" for pt, c in packs[:5]])
@@ -1433,6 +1701,12 @@ class DragonsCog(commands.Cog):
             # Find rarest by spawn chance
             rarest_dragon = min(all_user_dragons, key=lambda x: DRAGON_TYPES[x[0]]['spawn_chance'])[0]
 
+        # Get Server Trophy count
+        c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
+                  (guild_id, user_id, 'server_trophy'))
+        trophy_result = c.fetchone()
+        trophy_count = trophy_result[0] if trophy_result else 0
+
         # Get fastest and slowest catch times
         c.execute('''SELECT dragon_type, fastest_catch FROM user_dragons
                      WHERE guild_id = ? AND user_id = ? AND fastest_catch > 0
@@ -1480,6 +1754,14 @@ class DragonsCog(commands.Cog):
             value=f"Count: **{alpha_count}**\nCatch Boost: **+{total_catch_boost*100:.1f}%**",
             inline=True
         )
+
+        # Server Trophy (cosmetic)
+        if trophy_count > 0:
+            embed.add_field(
+                name="🥇 Server Trophies",
+                value="🥇 " * min(trophy_count, 10) + (f"\n*(+{trophy_count - 10} more)*" if trophy_count > 10 else ""),
+                inline=True
+            )
 
         # Rarest Dragon
         if rarest_dragon:

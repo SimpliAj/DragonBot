@@ -523,6 +523,13 @@ def init_db():
         UNIQUE(guild_id, user_id, adventure_type)
     )''')
 
+    # Migrate user_adventures: add double_loot column if missing
+    c.execute("PRAGMA table_info(user_adventures)")
+    adv_columns = [col[1] for col in c.fetchall()]
+    if 'double_loot' not in adv_columns:
+        c.execute('ALTER TABLE user_adventures ADD COLUMN double_loot INTEGER DEFAULT 0')
+        conn.commit()
+
     # Migrate alpha_dragons if needed
     c.execute("PRAGMA table_info(alpha_dragons)")
     columns = [col[1] for col in c.fetchall()]

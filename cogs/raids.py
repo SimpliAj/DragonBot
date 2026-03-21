@@ -331,6 +331,17 @@ class RaidAttackView(discord.ui.View):
         precision_bonus = min(precision_stones * 0.05, 0.30)
         damage = int(damage * (1 + precision_bonus))
 
+        # War Drum: +10% damage for this attack, then consume 1
+        c_a.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
+                  (btn_interaction.guild_id, btn_interaction.user.id, 'war_drum'))
+        drum_result = c_a.fetchone()
+        war_drum_used = False
+        if drum_result and drum_result[0] > 0:
+            damage = int(damage * 1.10)
+            c_a.execute('UPDATE user_items SET count = count - 1 WHERE guild_id = ? AND user_id = ? AND item_type = ?',
+                      (btn_interaction.guild_id, btn_interaction.user.id, 'war_drum'))
+            war_drum_used = True
+
         if damage <= 0:
             damage = 1
 
@@ -459,17 +470,19 @@ class RaidAttackView(discord.ui.View):
 
         tier_names = {'easy': '🟢 EASY', 'normal': '🟡 NORMAL', 'hard': '🔴 HARD'}
 
+        drum_note = " 🥁 *War Drum!*" if war_drum_used else ""
+
         # If tier is defeated, show victory message instead of normal attack message
         if tier_defeated:
             await btn_interaction.response.send_message(
-                f"⚔️ {btn_interaction.user.mention} dealt **{damage:,}** damage! ({tier_names[user_tier]})\n"
+                f"⚔️ {btn_interaction.user.mention} dealt **{damage:,}** damage!{drum_note} ({tier_names[user_tier]})\n"
                 f"💥 Total Damage: **{user_total_damage:,}**\n\n"
                 f"🎉 **{tier_names[user_tier]} TIER DEFEATED!**",
                 ephemeral=False
             )
         else:
             await btn_interaction.response.send_message(
-                f"⚔️ {btn_interaction.user.mention} dealt **{damage:,}** damage! ({tier_names[user_tier]})\n"
+                f"⚔️ {btn_interaction.user.mention} dealt **{damage:,}** damage!{drum_note} ({tier_names[user_tier]})\n"
                 f"💥 Total Damage: **{user_total_damage:,}**\n"
                 f"⏰ Next attack in: **10 minutes**",
                 ephemeral=False
@@ -1077,7 +1090,7 @@ async def spawn_raid_boss_ritual(bot, guild_id: int, channel: discord.TextChanne
         'manual_spawn': True
     }
 
-    boss_rarity = ritual['rarity']
+    boss_rarity = ritual['boss_rarity']
     ritual_difficulty = ritual['difficulty']  # easy, normal, or hard (affects HP scaling)
 
     # Get eligible dragons for this rarity
@@ -1105,17 +1118,18 @@ async def spawn_raid_boss_ritual(bot, guild_id: int, channel: discord.TextChanne
 
     # Calculate HP based on ritual dragon count and difficulty
     # All players share the same HP pool, no tier restrictions
+    # HP ranges match the auto-spawn raid boss system (admin.py hp_limits)
     ritual_dragon_count = ritual['donated']
 
-    if ritual_difficulty == 'easy':
-        boss_hp = ritual_dragon_count * 8000
-        boss_hp = max(8000, min(boss_hp, 25000))
-    elif ritual_difficulty == 'normal':
-        boss_hp = int(ritual_dragon_count * 12000)
-        boss_hp = max(12000, min(boss_hp, 40000))
-    else:  # hard
-        boss_hp = ritual_dragon_count * 16000
-        boss_hp = max(16000, min(boss_hp, 60000))
+    if ritual_difficulty == 'easy':       # epic rarity
+        boss_hp = ritual_dragon_count * 20000
+        boss_hp = max(20000, min(boss_hp, 100000))
+    elif ritual_difficulty == 'normal':   # legendary rarity
+        boss_hp = ritual_dragon_count * 40000
+        boss_hp = max(40000, min(boss_hp, 200000))
+    else:                                 # hard → mythic rarity
+        boss_hp = ritual_dragon_count * 75000
+        boss_hp = max(150000, min(boss_hp, 300000))
 
     reward_data = DRAGON_TYPES[reward_dragon]
 
@@ -1211,13 +1225,19 @@ class RaidsCog(commands.Cog):
 
         guild_id = interaction.guild_id
 
-        # Map difficulty to rarity tier
-        difficulty_to_rarity = {
-            'easy': 'epic',
-            'normal': 'legendary',
-            'hard': 'mythic'
+        # Map difficulty to accepted donation rarities and spawned boss rarity
+        difficulty_to_rarities = {
+            'easy':   ['common', 'uncommon', 'rare'],
+            'normal': ['epic', 'legendary', 'mythic'],
+            'hard':   ['ultra'],
         }
-        rarity = difficulty_to_rarity.get(difficulty, 'epic')
+        difficulty_to_boss_rarity = {
+            'easy':   'rare',
+            'normal': 'legendary',
+            'hard':   'ultra',
+        }
+        rarities = difficulty_to_rarities.get(difficulty, ['common'])
+        boss_rarity = difficulty_to_boss_rarity.get(difficulty, 'rare')
 
         # Check if ritual already active
         if guild_id in ritual_active:
@@ -1249,44 +1269,26 @@ class RaidsCog(commands.Cog):
             return
 
         # Dragons required per difficulty (scales with server size)
-        # Calculate server dragon pool by rarity
         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
         c = conn.cursor()
 
-        # Get total dragons per rarity tier
-        rarity_dragons = {
-            'epic': 0,
-            'legendary': 0,
-            'mythic': 0,
-            'ultra': 0
-        }
-
-        c.execute('SELECT dragon_type, COALESCE(SUM(count), 0) FROM user_dragons WHERE guild_id = ? GROUP BY dragon_type', (guild_id,))
-        dragon_counts = c.fetchall()
-
-        for dragon_type, count in dragon_counts:
-            for r, dragons in DRAGON_RARITY_TIERS.items():
-                if dragon_type in dragons and r in rarity_dragons:
-                    rarity_dragons[r] += count
-                    break
-
-        # Count active players with this rarity (those with at least 1 dragon)
-        active_players = {}
-        for r in ['epic', 'legendary', 'mythic', 'ultra']:
-            c.execute('''SELECT COUNT(DISTINCT user_id) FROM user_dragons
-                         WHERE guild_id = ? AND dragon_type IN (?)''',
-                      (guild_id, ','.join(f"'{d}'" for d in DRAGON_RARITY_TIERS.get(r, []))))
-            active_count = c.fetchone()[0] or 1
-            active_players[r] = active_count
+        # Count distinct active players who own at least 1 dragon of any accepted rarity
+        accepted_dragon_types = []
+        for r in rarities:
+            accepted_dragon_types.extend(DRAGON_RARITY_TIERS.get(r, []))
+        placeholders = ','.join('?' * len(accepted_dragon_types))
+        c.execute(f'''SELECT COUNT(DISTINCT user_id) FROM user_dragons
+                      WHERE guild_id = ? AND dragon_type IN ({placeholders}) AND count > 0''',
+                  (guild_id, *accepted_dragon_types))
+        active = c.fetchone()[0] or 1
 
         conn.close()
 
-        # Ritual requirements: Scale by active players for this rarity
+        # Ritual requirements: Scale by active players
         # Small servers (1-10 active): 1 dragon
         # Medium servers (11-30): 2 dragons
         # Large servers (31-60): 3 dragons
         # Very large (60+): 4 dragons
-        active = active_players.get(rarity, 1)
         if active <= 10:
             required = 1
         elif active <= 30:
@@ -1299,12 +1301,15 @@ class RaidsCog(commands.Cog):
         # Initialize ritual
         ritual_active[guild_id] = {
             'difficulty': difficulty,
-            'rarity': rarity,
+            'rarities': rarities,
+            'boss_rarity': boss_rarity,
             'donated': 0,
             'required': required,
             'donors': {},
             'message_id': None
         }
+
+        rarity_display = '/'.join(r.capitalize() for r in rarities)
 
         # Create ritual progress embed
         ritual_embed = discord.Embed(
@@ -1315,7 +1320,7 @@ class RaidsCog(commands.Cog):
         )
         ritual_embed.add_field(
             name="🐉 How to Participate",
-            value="Click the **Donate Dragons** button below to contribute dragons of the chosen rarity!",
+            value=f"Click **Donate Dragons** and contribute any **{rarity_display}** dragon!",
             inline=False
         )
         ritual_embed.add_field(
@@ -1342,9 +1347,9 @@ class RaidsCog(commands.Cog):
                     return
 
                 ritual = ritual_active[gid]
-                ritual_rarity = ritual['rarity']
+                ritual_rarities = ritual['rarities']
 
-                # Get user's dragons of that rarity
+                # Get user's dragons of any accepted rarity
                 conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
                 c = conn.cursor()
 
@@ -1355,7 +1360,7 @@ class RaidsCog(commands.Cog):
                 user_dragons = c.fetchall()
                 conn.close()
 
-                # Filter by ritual rarity
+                # Filter by accepted rarities
                 ritual_dragons = []
                 for dragon_type, count in user_dragons:
                     dragon_rarity = 'common'
@@ -1364,11 +1369,12 @@ class RaidsCog(commands.Cog):
                             dragon_rarity = r
                             break
 
-                    if dragon_rarity == ritual_rarity:
+                    if dragon_rarity in ritual_rarities:
                         ritual_dragons.append((dragon_type, count))
 
                 if not ritual_dragons:
-                    await inter.followup.send(f"❌ You don't have any {ritual_rarity} dragons!", ephemeral=True)
+                    rarity_str = '/'.join(ritual_rarities)
+                    await inter.followup.send(f"❌ You don't have any {rarity_str} dragons!", ephemeral=True)
                     return
 
                 # Selection modal
@@ -1493,7 +1499,7 @@ class RaidsCog(commands.Cog):
                                     progress_bar = "█" * int(progress_pct / 10) + "░" * (10 - int(progress_pct / 10))
 
                                     updated_embed = discord.Embed(
-                                        title=f"🔮 Community Ritual: {ritual['rarity'].upper()} Boss",
+                                        title=f"🔮 Community Ritual: {ritual['difficulty'].upper()} Boss",
                                         description=f"Unite and donate dragons to summon a powerful raid boss!\n\n"
                                                     f"📊 Progress: **{progress} / {required}** Dragons\n"
                                                     f"{progress_bar} {progress_pct}%",
@@ -1595,6 +1601,14 @@ class RaidsCog(commands.Cog):
         user_id = interaction.user.id
         current_time = int(time.time())
 
+        from database import get_server_config
+        cfg = get_server_config(guild_id)
+        if not cfg['raids_enabled']:
+            await interaction.response.send_message(
+                "❌ Raids are not enabled on this server. Ask an admin to enable them via `/serverconfig`.",
+                ephemeral=True)
+            return
+
         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
         c = conn.cursor()
 
@@ -1606,7 +1620,9 @@ class RaidsCog(commands.Cog):
 
         if not boss_data:
             conn.close()
-            await interaction.response.send_message("❌ No active raid boss! Check back at 8 AM, 4 PM, or 8 PM Vienna time.", ephemeral=False)
+            await interaction.response.send_message(
+                "❌ No active raid boss! Check back later.",
+                ephemeral=False)
             return
 
         boss_name, easy_hp, easy_max_hp, normal_hp, normal_max_hp, hard_hp, hard_max_hp, boss_rarity, expires_at, reward_dragon, easy_part_str, normal_part_str, hard_part_str = boss_data

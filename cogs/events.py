@@ -1380,6 +1380,11 @@ class EventsCog(commands.Cog):
                         coins_earned = int(coins_earned * total_coin_multiplier)
                         alpha_coin_bonus = coins_earned - base_coins
 
+                        # Gold Rush: +50% coin bonus if active
+                        from utils import get_active_item as _get_active_item
+                        if _get_active_item(guild_id, message.author.id, 'gold_rush'):
+                            coins_earned = int(coins_earned * 1.5)
+
                         await asyncio.to_thread(update_balance, guild_id, message.author.id, coins_earned)
 
                         # Track dragonfest catches if active

@@ -13,7 +13,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from config import DRAGONNEST_UPGRADES
+from config import DRAGONNEST_UPGRADES, CONSUMABLE_ITEMS, MYSTERY_BOX_POOL, DICE_OF_FATE_EFFECTS
 from database import get_user, update_balance, get_active_item, is_player_softlocked
 from state import active_luckycharms, active_usable_items
 from utils import format_time_remaining, check_dragonpass_quests
@@ -169,301 +169,292 @@ class EconomyCog(commands.Cog):
 
         user_data = get_user(interaction.guild_id, interaction.user.id)
         balance = user_data[2]
+        guild_id = interaction.guild_id
 
-        embed = discord.Embed(
-            title="🏪 Dragon Emporium",
-            description=f"**Your Balance:** {int(balance)} 🪙\n\nSelect an item from the dropdown menu below!",
-            color=0x5865F2
-        )
+        # ── All item data (single source of truth) ──────────────────────────
+        items_data = {
+            'pack_wooden':                   {'name': 'Wooden Pack',        'price': 500,    'emoji': '<:woodenchest:1446170002708238476>'},
+            'pack_stone':                    {'name': 'Stone Pack',         'price': 1000,   'emoji': '<:stonechest:1446169958265389247>'},
+            'pack_bronze':                   {'name': 'Bronze Pack',        'price': 1500,   'emoji': '<:bronzechest:1446169758599745586>'},
+            'boost_dragonscale':             {'name': 'Dragonscale (2min)', 'price': 20000,  'emoji': '<:dragonscale:1446278170998341693>', 'duration': 120},
+            'boost_premium':                 {'name': 'Dragonscale (10min)','price': 100000, 'emoji': '<:dragonscale:1446278170998341693>', 'duration': 600},
+            'item_luckycharm':               {'name': 'Lucky Charm',        'price': 15000,  'emoji': '🍀'},
+            'item_dna':                      {'name': 'DNA Sample',         'price': 12500,  'emoji': '🧬'},
+            'usable_night_vision':           {'name': 'Night Vision',       'price': 50000,  'emoji': '🌙'},
+            'usable_lucky_dice':             {'name': 'Lucky Dice',         'price': 10000,  'emoji': '🎰'},
+            'usable_gold_rush':              {'name': 'Gold Rush',          'price': 8000,   'emoji': '✨'},
+            'consumable_mystery_box':        {'name': 'Mystery Box',        'price': 5000,   'emoji': '❓'},
+            'consumable_dice_of_fate':       {'name': 'Dice of Fate',       'price': 3000,   'emoji': '🎲'},
+            'consumable_fast_travel_scroll': {'name': 'Fast Travel Scroll', 'price': 8000,   'emoji': '📜'},
+            'consumable_double_loot_bag':    {'name': 'Double Loot Bag',    'price': 6000,   'emoji': '🎒'},
+            'consumable_war_drum':           {'name': 'War Drum',           'price': 4000,   'emoji': '🥁'},
+            'consumable_shield_rune':        {'name': 'Shield Rune',        'price': 3500,   'emoji': '🔷'},
+            'consumable_server_trophy':      {'name': 'Server Trophy',      'price': 25000,  'emoji': '🥇'},
+        }
 
-        # Organized shop display with custom emoji icons
-        embed.add_field(
-            name="📦 Dragon Packs",
-            value="<:woodenchest:1446170002708238476> Wooden Pack    -      500 🪙\n"
-                  "<:stonechest:1446169958265389247> Stone Pack      -    1,000 🪙\n"
-                  "<:bronzechest:1446169758599745586> Bronze Pack    -    1,500 🪙",
-            inline=False
-        )
+        # ── Category definitions ─────────────────────────────────────────────
+        categories = {
+            'packs': {
+                'label': 'Dragon Packs', 'emoji': '📦', 'color': 0xA0522D,
+                'description': 'Open packs to discover new dragons! Use `/openpacks` to open them.',
+                'lines': [
+                    '<:woodenchest:1446170002708238476> **Wooden Pack** — 500 🪙',
+                    '<:stonechest:1446169958265389247> **Stone Pack** — 1,000 🪙',
+                    '<:bronzechest:1446169758599745586> **Bronze Pack** — 1,500 🪙',
+                ],
+                'options': [
+                    discord.SelectOption(label="Wooden Pack", description="500 🪙",   emoji="<:woodenchest:1446170002708238476>", value="pack_wooden"),
+                    discord.SelectOption(label="Stone Pack",  description="1,000 🪙", emoji="<:stonechest:1446169958265389247>",  value="pack_stone"),
+                    discord.SelectOption(label="Bronze Pack", description="1,500 🪙", emoji="<:bronzechest:1446169758599745586>", value="pack_bronze"),
+                ],
+            },
+            'boosts': {
+                'label': 'Spawn Boosts', 'emoji': '⚡', 'color': 0xFFD700,
+                'description': 'Trigger server-wide dragon spawn events for everyone!',
+                'lines': [
+                    '⚡ **Dragonscale (2min)** — 20,000 🪙',
+                    '   └─ Server-wide spawn event for 2 minutes',
+                    '⚡ **Dragonscale (10min)** — 100,000 🪙',
+                    '   └─ Server-wide spawn event for 10 minutes',
+                ],
+                'options': [
+                    discord.SelectOption(label="Dragonscale (2min)",  description="20,000 🪙",  emoji="<:dragonscale:1446278170998341693>", value="boost_dragonscale"),
+                    discord.SelectOption(label="Dragonscale (10min)", description="100,000 🪙", emoji="<:dragonscale:1446278170998341693>", value="boost_premium"),
+                ],
+            },
+            'special': {
+                'label': 'Special Items', 'emoji': '🎁', 'color': 0x00CC77,
+                'description': 'Powerful items that go to your inventory for later use.',
+                'lines': [
+                    '🍀 **Lucky Charm** — 15,000 🪙',
+                    '   └─ 2x Catch Rate for 30 min — activate in `/inventory`',
+                    '🧬 **DNA Sample** — 12,500 🪙',
+                    '   └─ Clone any dragon you own when breeding',
+                ],
+                'options': [
+                    discord.SelectOption(label="Lucky Charm", description="15,000 🪙 - 2x catch 30min", emoji="🍀", value="item_luckycharm"),
+                    discord.SelectOption(label="DNA Sample",  description="12,500 🪙 - Clone a dragon", emoji="🧬", value="item_dna"),
+                ],
+            },
+            'active': {
+                'label': 'Active Boosts', 'emoji': '💎', 'color': 0x9B59B6,
+                'description': 'Timed personal boosts — activate from `/inventory`.',
+                'lines': [
+                    '🌙 **Night Vision** — 50,000 🪙',
+                    '   └─ +50% spawn rarity (20:00–08:00, once per night)',
+                    '🎰 **Lucky Dice** — 10,000 🪙',
+                    '   └─ +10% casino win chance for 30 minutes',
+                    '✨ **Gold Rush** — 8,000 🪙',
+                    '   └─ +50% coin drops when catching dragons for 1 hour',
+                ],
+                'options': [
+                    discord.SelectOption(label="Night Vision", description="50,000 🪙 - +50% rarity (night)", emoji="🌙", value="usable_night_vision"),
+                    discord.SelectOption(label="Lucky Dice",   description="10,000 🪙 - +10% casino (30min)", emoji="🎰", value="usable_lucky_dice"),
+                    discord.SelectOption(label="Gold Rush",    description="8,000 🪙 - +50% coin drops (1h)", emoji="✨", value="usable_gold_rush"),
+                ],
+            },
+            'raid': {
+                'label': 'Raid Items', 'emoji': '⚔️', 'color': 0xE74C3C,
+                'description': 'Items that help you in Raid Boss battles.',
+                'lines': [
+                    '🥁 **War Drum** — 4,000 🪙',
+                    '   └─ +10% damage on your next raid attack (auto-consumed)',
+                    '🔷 **Shield Rune** — 3,500 🪙',
+                    '   └─ 300 🪙 consolation if your raid tier escapes (auto-consumed)',
+                ],
+                'options': [
+                    discord.SelectOption(label="War Drum",    description="4,000 🪙 - +10% next raid attack",    emoji="🥁", value="consumable_war_drum"),
+                    discord.SelectOption(label="Shield Rune", description="3,500 🪙 - consolation if raid fails", emoji="🔷", value="consumable_shield_rune"),
+                ],
+            },
+            'consumables': {
+                'label': 'Consumables', 'emoji': '🎮', 'color': 0x3498DB,
+                'description': 'One-use items with varied effects. Open/roll from `/inventory`.',
+                'lines': [
+                    '❓ **Mystery Box** — 5,000 🪙',
+                    '   └─ Random item inside — open in `/inventory`',
+                    '🎲 **Dice of Fate** — 3,000 🪙',
+                    '   └─ Random effect (good or bad!) — roll in `/inventory`',
+                    '📜 **Fast Travel Scroll** — 8,000 🪙',
+                    '   └─ Halves your next adventure duration',
+                    '🎒 **Double Loot Bag** — 6,000 🪙',
+                    '   └─ Doubles item drops from your next adventure',
+                ],
+                'options': [
+                    discord.SelectOption(label="Mystery Box",        description="5,000 🪙 - Random item",        emoji="❓", value="consumable_mystery_box"),
+                    discord.SelectOption(label="Dice of Fate",       description="3,000 🪙 - Random effect",      emoji="🎲", value="consumable_dice_of_fate"),
+                    discord.SelectOption(label="Fast Travel Scroll", description="8,000 🪙 - Halve adventure",    emoji="📜", value="consumable_fast_travel_scroll"),
+                    discord.SelectOption(label="Double Loot Bag",    description="6,000 🪙 - 2x adventure items", emoji="🎒", value="consumable_double_loot_bag"),
+                ],
+            },
+            'cosmetics': {
+                'label': 'Cosmetics', 'emoji': '🥇', 'color': 0xF1C40F,
+                'description': 'Purely cosmetic items displayed in your profile.',
+                'lines': [
+                    '🥇 **Server Trophy** — 25,000 🪙',
+                    '   └─ Displayed as trophies in your `/stats` profile',
+                ],
+                'options': [
+                    discord.SelectOption(label="Server Trophy", description="25,000 🪙 - Shown in /stats", emoji="🥇", value="consumable_server_trophy"),
+                ],
+            },
+        }
 
-        embed.add_field(
-            name="⚡ Spawn Boosts",
-            value="```"
-                  "⚡ Dragonscale (2min)  -  20,000 🪙\n"
-                  "⚡ Dragonscale (10min) - 100,000 🪙"
-                  "```",
-            inline=False
-        )
+        # ── Main shop overview embed ─────────────────────────────────────────
+        def build_main_embed(bal: float) -> discord.Embed:
+            lines = "\n".join(
+                f"{cat['emoji']} **{cat['label']}** — {cat['description']}"
+                for cat in categories.values()
+            )
+            e = discord.Embed(
+                title="🏪 Dragon Emporium",
+                description=f"**Your Balance:** {int(bal):,} 🪙\n\n{lines}",
+                color=0x5865F2
+            )
+            e.set_footer(text="Select a category below to browse items and buy.")
+            return e
 
-        embed.add_field(
-            name="🎁 Special Items",
-            value="```"
-                  "🍀 Lucky Charm (30min) - 15,000 🪙\n"
-                  "   └─ 2x Catch Rate (inventory)\n"
-                  "🧬 DNA Sample - 12,500 🪙\n"
-                  "   └─ Clone any dragon you own\n"
-                  "```",
-            inline=False
-        )
+        # ── Category embed ───────────────────────────────────────────────────
+        def build_category_embed(cat_key: str, bal: float) -> discord.Embed:
+            cat = categories[cat_key]
+            e = discord.Embed(
+                title=f"{cat['emoji']} {cat['label']}",
+                description=f"**Your Balance:** {int(bal):,} 🪙\n\n{cat['description']}\n\n" + "\n".join(cat['lines']),
+                color=cat['color']
+            )
+            e.set_footer(text="Select an item below to purchase.")
+            return e
 
-        embed.add_field(
-            name="💎 Usable Items",
-            value="🌙 Night Vision       - 50,000 🪙\n"
-                  "   └─ +50% rarity (20:00-08:00, once per night)\n"
-                  "🎰 Lucky Dice         - 10,000 🪙\n"
-                  "   └─ +10% casino win chance (30min)",
-            inline=False
-        )
+        # ── Purchase handler (same logic as before, extracted) ───────────────
+        async def handle_purchase(sel_interaction: discord.Interaction, selected: str):
+            category, item = selected.split('_', 1)
+            item_info = items_data[selected]
+            price = item_info['price']
 
-        embed.set_footer(text="💡 Lucky Charm and DNA Sample go to inventory for later use!")
+            ud = get_user(sel_interaction.guild_id, sel_interaction.user.id)
+            bal = ud[2]
 
-        # Single unified shop select menu
-        class UnifiedShopSelect(discord.ui.Select):
-            def __init__(self):
-                options = [
-                    # Packs
-                    discord.SelectOption(label="Wooden Pack", description="500 🪙 - Basic dragons", emoji="<:woodenchest:1446170002708238476>", value="pack_wooden"),
-                    discord.SelectOption(label="Stone Pack", description="1,000 🪙 - Better odds", emoji="<:stonechest:1446169958265389247>", value="pack_stone"),
-                    discord.SelectOption(label="Bronze Pack", description="1,500 🪙 - Common dragons", emoji="<:bronzechest:1446169758599745586>", value="pack_bronze"),
-                    # Boosts
-                    discord.SelectOption(label="Dragonscale (2min)", description="20,000 🪙 - Fast dragon spawns", emoji="<:dragonscale:1446278170998341693>", value="boost_dragonscale"),
-                    discord.SelectOption(label="Dragonscale (10min)", description="100,000 🪙 - Ultra fast spawns", emoji="<:dragonscale:1446278170998341693>", value="boost_premium"),
-                    # Special Items
-                    discord.SelectOption(label="Lucky Charm", description="15,000 🪙 - 2x catch for 30min (inventory)", emoji="🍀", value="item_luckycharm"),
-                    discord.SelectOption(label="DNA Sample", description="12,500 🪙 - Clone a dragon (inventory)", emoji="🧬", value="item_dna"),
-                    # Usable Items
-                    discord.SelectOption(label="Night Vision", description="50,000 🪙 - +50% rarity (20:00-08:00, 1x/night)", emoji="🌙", value="usable_night_vision"),
-                    discord.SelectOption(label="Lucky Dice", description="10,000 🪙 - +10% casino win chance (30min)", emoji="🎰", value="usable_lucky_dice"),
-                ]
-                super().__init__(placeholder="🛒 Choose an item to purchase...", options=options, row=0)
+            if bal < price:
+                await sel_interaction.response.send_message(
+                    f"❌ You need **{price:,}** 🪙 but only have **{int(bal):,}** 🪙!",
+                    ephemeral=False
+                )
+                return
 
-            async def callback(self, interaction: discord.Interaction):
-                selected = self.values[0]
-                category, item = selected.split('_', 1)  # maxsplit=1 to handle multi-part items like 'knowledge_book'
+            # Create quantity modal
+            class QuantityModal(discord.ui.Modal, title="How many do you want to buy?"):
+                quantity = discord.ui.TextInput(
+                    label="Quantity",
+                    placeholder="Enter amount",
+                    required=True,
+                    min_length=1,
+                    max_length=4
+                )
 
-                user_data = get_user(interaction.guild_id, interaction.user.id)
-                balance = user_data[2]
+                async def on_submit(self, modal_interaction: discord.Interaction):
+                    try:
+                        qty = int(self.quantity.value)
+                        if qty < 1:
+                            await modal_interaction.response.send_message("❌ Quantity must be at least 1!", ephemeral=True)
+                            return
 
-                # Define all prices and items
-                items_data = {
-                    'pack_wooden': {'name': 'Wooden Pack', 'price': 500, 'emoji': '<:woodenchest:1446170002708238476>'},
-                    'pack_stone': {'name': 'Stone Pack', 'price': 1000, 'emoji': '<:stonechest:1446169958265389247>'},
-                    'pack_bronze': {'name': 'Bronze Pack', 'price': 1500, 'emoji': '<:bronzechest:1446169758599745586>'},
-                    'boost_dragonscale': {'name': 'Dragonscale (2min)', 'price': 20000, 'emoji': '<:dragonscale:1446278170998341693>', 'duration': 120},
-                    'boost_premium': {'name': 'Dragonscale (10min)', 'price': 100000, 'emoji': '<:dragonscale:1446278170998341693>', 'duration': 600},
-                    'item_luckycharm': {'name': 'Lucky Charm', 'price': 15000, 'emoji': '🍀'},
-                    'item_dna': {'name': 'DNA Sample', 'price': 12500, 'emoji': '🧬'},
-                    'usable_night_vision': {'name': 'Night Vision', 'price': 50000, 'emoji': '🌙'},
-                    'usable_lucky_dice': {'name': 'Lucky Dice', 'price': 10000, 'emoji': '🎰'},
-                }
+                        total_price = price * qty
+                        user_data = get_user(interaction.guild_id, modal_interaction.user.id)
+                        balance = user_data[2]
 
-                item_info = items_data[selected]
-                price = item_info['price']
+                        if balance < total_price:
+                            await modal_interaction.response.send_message(
+                                f"❌ You need **{total_price:,}** 🪙 but only have **{int(balance):,}** 🪙!",
+                                ephemeral=True
+                            )
+                            return
 
-                # No dynamic pricing - shop prices stay the same regardless of ownership
-
-                if balance < price:
-                    await interaction.response.send_message(
-                        f"❌ You need **{price:,}** 🪙 but only have **{int(balance):,}** 🪙!",
-                        ephemeral=False
-                    )
-                    return
-
-                # Create quantity modal
-                class QuantityModal(discord.ui.Modal, title="How many do you want to buy?"):
-                    quantity = discord.ui.TextInput(
-                        label="Quantity",
-                        placeholder="Enter amount",
-                        required=True,
-                        min_length=1,
-                        max_length=4
-                    )
-
-                    async def on_submit(self, modal_interaction: discord.Interaction):
-                        try:
-                            qty = int(self.quantity.value)
-                            if qty < 1:
-                                await modal_interaction.response.send_message("❌ Quantity must be at least 1!", ephemeral=True)
+                        # Process purchase based on category
+                        if category == 'pack':
+                            await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, -total_price)
+                            try:
+                                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                c = conn.cursor()
+                                c.execute('''INSERT INTO user_packs (guild_id, user_id, pack_type, count)
+                                             VALUES (?, ?, ?, ?)
+                                             ON CONFLICT(guild_id, user_id, pack_type)
+                                             DO UPDATE SET count = count + ?''',
+                                          (interaction.guild_id, modal_interaction.user.id, item, qty, qty))
+                                conn.commit()
+                                conn.close()
+                            except Exception as e:
+                                await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, total_price)
+                                await modal_interaction.response.send_message(f"❌ Failed to add packs: {e}", ephemeral=True)
                                 return
+                            embed = discord.Embed(
+                                title="✅ Packs Purchased!",
+                                description=f"{item_info['emoji']} **{qty}x {item_info['name']}** added to inventory!\n\n"
+                                            f"**Total Cost:** {total_price:,} 🪙\n"
+                                            f"**New Balance:** {int(balance - total_price):,} 🪙\n\n"
+                                            f"Use `/openpacks` to open them!",
+                                color=discord.Color.green()
+                            )
+                            await modal_interaction.response.send_message(embed=embed, ephemeral=False)
 
-                            total_price = price * qty
-                            user_data = get_user(interaction.guild_id, modal_interaction.user.id)
-                            balance = user_data[2]
-
-                            if balance < total_price:
-                                await modal_interaction.response.send_message(
-                                    f"❌ You need **{total_price:,}** 🪙 but only have **{int(balance):,}** 🪙!",
-                                    ephemeral=True
-                                )
+                        elif category == 'boost':
+                            await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, -total_price)
+                            minutes_to_add = (item_info['duration'] // 60) * qty
+                            try:
+                                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                c = conn.cursor()
+                                c.execute('SELECT minutes FROM dragonscales WHERE guild_id = ? AND user_id = ?',
+                                          (interaction.guild_id, modal_interaction.user.id))
+                                existing = c.fetchone()
+                                if existing:
+                                    c.execute('UPDATE dragonscales SET minutes = minutes + ? WHERE guild_id = ? AND user_id = ?',
+                                              (minutes_to_add, interaction.guild_id, modal_interaction.user.id))
+                                else:
+                                    c.execute('INSERT INTO dragonscales (guild_id, user_id, minutes) VALUES (?, ?, ?)',
+                                              (interaction.guild_id, modal_interaction.user.id, minutes_to_add))
+                                conn.commit()
+                                conn.close()
+                            except Exception as e:
+                                await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, total_price)
+                                await modal_interaction.response.send_message(f"❌ Failed to add dragonscale: {e}", ephemeral=True)
                                 return
+                            embed = discord.Embed(
+                                title="✅ Dragonscale Minutes Purchased!",
+                                description=f"⚡ **{minutes_to_add} minutes** added to your inventory!\n\n"
+                                            f"**Total Cost:** {total_price:,} 🪙\n"
+                                            f"**New Balance:** {int(balance - total_price):,} 🪙\n\n"
+                                            f"💡 Use the button in `/inventory` to activate!",
+                                color=discord.Color.green()
+                            )
+                            await modal_interaction.response.send_message(embed=embed, ephemeral=False)
 
-                            # Process purchase based on category
-                            if category == 'pack':
-                                # Deduct balance FIRST before modifying inventory
-                                await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, -total_price)
-
-                                # Add pack to inventory
+                        elif category == 'item':
+                            await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, -total_price)
+                            if item == 'luckycharm':
                                 try:
                                     conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
                                     c = conn.cursor()
-                                    c.execute('''INSERT INTO user_packs (guild_id, user_id, pack_type, count)
-                                                 VALUES (?, ?, ?, ?)
-                                                 ON CONFLICT(guild_id, user_id, pack_type)
+                                    c.execute('''INSERT INTO user_luckycharms (guild_id, user_id, count)
+                                                 VALUES (?, ?, ?)
+                                                 ON CONFLICT(guild_id, user_id)
                                                  DO UPDATE SET count = count + ?''',
-                                              (interaction.guild_id, modal_interaction.user.id, item, qty, qty))
+                                              (interaction.guild_id, modal_interaction.user.id, qty, qty))
                                     conn.commit()
                                     conn.close()
                                 except Exception as e:
-                                    # If insertion fails, refund the user
                                     await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, total_price)
-                                    await modal_interaction.response.send_message(
-                                        f"❌ Failed to add packs to inventory: {str(e)}",
-                                        ephemeral=True
-                                    )
+                                    await modal_interaction.response.send_message(f"❌ Failed to add Lucky Charm: {e}", ephemeral=True)
                                     return
-
                                 embed = discord.Embed(
-                                    title="✅ Packs Purchased!",
-                                    description=f"{item_info['emoji']} **{qty}x {item_info['name']}** added to inventory!\n\n"
-                                                f"**Total Cost:** {total_price:,} 🪙\n"
-                                                f"**New Balance:** {int(balance - total_price):,} 🪙\n\n"
-                                                f"Use `/openpacks` to open them!",
-                                    color=discord.Color.green()
-                                )
-                                await modal_interaction.response.send_message(embed=embed, ephemeral=False)
-
-                            elif category == 'boost':
-                                # Deduct balance FIRST
-                                await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, -total_price)
-
-                                # Add dragonscale minutes to inventory
-                                minutes_to_add = (item_info['duration'] // 60) * qty
-                                try:
-                                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
-                                    c = conn.cursor()
-
-                                    # Check if user already has dragonscales
-                                    c.execute('SELECT minutes FROM dragonscales WHERE guild_id = ? AND user_id = ?',
-                                              (interaction.guild_id, modal_interaction.user.id))
-                                    existing = c.fetchone()
-
-                                    if existing:
-                                        # Update existing
-                                        c.execute('UPDATE dragonscales SET minutes = minutes + ? WHERE guild_id = ? AND user_id = ?',
-                                                  (minutes_to_add, interaction.guild_id, modal_interaction.user.id))
-                                    else:
-                                        # Insert new
-                                        c.execute('INSERT INTO dragonscales (guild_id, user_id, minutes) VALUES (?, ?, ?)',
-                                                  (interaction.guild_id, modal_interaction.user.id, minutes_to_add))
-
-                                    conn.commit()
-                                    conn.close()
-                                except Exception as e:
-                                    # If insertion fails, refund the user
-                                    await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, total_price)
-                                    await modal_interaction.response.send_message(
-                                        f"❌ Failed to add dragonscale to inventory: {str(e)}",
-                                        ephemeral=True
-                                    )
-                                    return
-
-                                embed = discord.Embed(
-                                    title="✅ Dragonscale Minutes Purchased!",
-                                    description=f"⚡ **{minutes_to_add} minutes** added to your inventory!\n\n"
+                                    title="✅ Lucky Charms Purchased!",
+                                    description=f"🍀 **{qty}x Lucky Charm** added to inventory!\n\n"
+                                                f"**Effect:** 2x Catch Rate for 30 minutes\n"
                                                 f"**Total Cost:** {total_price:,} 🪙\n"
                                                 f"**New Balance:** {int(balance - total_price):,} 🪙\n\n"
                                                 f"💡 Use the button in `/inventory` to activate!",
                                     color=discord.Color.green()
                                 )
                                 await modal_interaction.response.send_message(embed=embed, ephemeral=False)
-
-                            elif category == 'item':
-                                if item == 'luckycharm':
-                                    # Deduct balance FIRST
-                                    await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, -total_price)
-
-                                    # Add to inventory
-                                    try:
-                                        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
-                                        c = conn.cursor()
-                                        c.execute('''INSERT INTO user_luckycharms (guild_id, user_id, count)
-                                                     VALUES (?, ?, ?)
-                                                     ON CONFLICT(guild_id, user_id)
-                                                     DO UPDATE SET count = count + ?''',
-                                                  (interaction.guild_id, modal_interaction.user.id, qty, qty))
-                                        conn.commit()
-                                        conn.close()
-                                    except Exception as e:
-                                        # If insertion fails, refund the user
-                                        await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, total_price)
-                                        await modal_interaction.response.send_message(
-                                            f"❌ Failed to add Lucky Charm to inventory: {str(e)}",
-                                            ephemeral=True
-                                        )
-                                        return
-
-                                    embed = discord.Embed(
-                                        title="✅ Lucky Charms Purchased!",
-                                        description=f"🍀 **{qty}x Lucky Charm** added to inventory!\n\n"
-                                                    f"**Effect:** 2x Catch Rate for 30 minutes\n"
-                                                    f"**Total Cost:** {total_price:,} 🪙\n"
-                                                    f"**New Balance:** {int(balance - total_price):,} 🪙\n\n"
-                                                    f"💡 Use the button in `/inventory` to activate!",
-                                        color=discord.Color.green()
-                                    )
-                                    await modal_interaction.response.send_message(embed=embed, ephemeral=False)
-
-                                elif item == 'dna':
-                                    # Deduct balance FIRST
-                                    await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, -total_price)
-
-                                    # Add DNA Sample to inventory
-                                    try:
-                                        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
-                                        c = conn.cursor()
-                                        c.execute('''INSERT INTO user_items (guild_id, user_id, item_type, count)
-                                                     VALUES (?, ?, ?, ?)
-                                                     ON CONFLICT(guild_id, user_id, item_type)
-                                                     DO UPDATE SET count = count + ?''',
-                                                  (interaction.guild_id, modal_interaction.user.id, 'dna', qty, qty))
-                                        conn.commit()
-                                        conn.close()
-                                    except Exception as e:
-                                        # If insertion fails, refund the user
-                                        await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, total_price)
-                                        await modal_interaction.response.send_message(
-                                            f"❌ Failed to add DNA Sample to inventory: {str(e)}",
-                                            ephemeral=True
-                                        )
-                                        return
-
-                                    embed = discord.Embed(
-                                        title="✅ DNA Samples Purchased!",
-                                        description=f"🧬 **{qty}x DNA Sample** added to inventory!\n\n"
-                                                    f"**Effect:** Clone a dragon when breeding\n"
-                                                    f"**Total Cost:** {total_price:,} 🪙\n"
-                                                    f"**New Balance:** {int(balance - total_price):,} 🪙\n\n"
-                                                    f"💡 Use with `/breed` to clone dragons!",
-                                        color=discord.Color.green()
-                                    )
-                                    await modal_interaction.response.send_message(embed=embed, ephemeral=False)
-
-                            elif category == 'usable':
-                                # Add usable item to inventory (Night Vision, Lucky Dice)
-                                item_type_map = {
-                                    'night_vision': 'night_vision',
-                                    'lucky_dice': 'lucky_dice'
-                                }
-
-                                if item not in item_type_map:
-                                    await modal_interaction.response.send_message(f"❌ Unknown item: {item}", ephemeral=True)
-                                    return
-
-                                item_type = item_type_map[item]
-
-                                # Deduct balance FIRST
-                                await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, -total_price)
-
-                                # Add to inventory
+                            elif item == 'dna':
                                 try:
                                     conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
                                     c = conn.cursor()
@@ -471,40 +462,148 @@ class EconomyCog(commands.Cog):
                                                  VALUES (?, ?, ?, ?)
                                                  ON CONFLICT(guild_id, user_id, item_type)
                                                  DO UPDATE SET count = count + ?''',
-                                              (interaction.guild_id, modal_interaction.user.id, item_type, qty, qty))
+                                              (interaction.guild_id, modal_interaction.user.id, 'dna', qty, qty))
                                     conn.commit()
                                     conn.close()
                                 except Exception as e:
-                                    # If insertion fails, refund the user
                                     await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, total_price)
-                                    await modal_interaction.response.send_message(
-                                        f"❌ Failed to add item to inventory: {str(e)}",
-                                        ephemeral=True
-                                    )
+                                    await modal_interaction.response.send_message(f"❌ Failed to add DNA Sample: {e}", ephemeral=True)
                                     return
-
                                 embed = discord.Embed(
-                                    title="✅ Usable Items Purchased!",
-                                    description=f"{item_info['emoji']} **{qty}x {item_info['name']}** added to inventory!\n\n"
+                                    title="✅ DNA Samples Purchased!",
+                                    description=f"🧬 **{qty}x DNA Sample** added to inventory!\n\n"
+                                                f"**Effect:** Clone a dragon when breeding\n"
                                                 f"**Total Cost:** {total_price:,} 🪙\n"
                                                 f"**New Balance:** {int(balance - total_price):,} 🪙\n\n"
-                                                f"💡 Use the button in `/inventory` to activate them!",
+                                                f"💡 Use with `/breed` to clone dragons!",
                                     color=discord.Color.green()
                                 )
                                 await modal_interaction.response.send_message(embed=embed, ephemeral=False)
 
-                        except ValueError:
-                            await modal_interaction.response.send_message("❌ Please enter a valid number!", ephemeral=True)
+                        elif category == 'usable':
+                            item_type_map = {'night_vision': 'night_vision', 'lucky_dice': 'lucky_dice', 'gold_rush': 'gold_rush'}
+                            if item not in item_type_map:
+                                await modal_interaction.response.send_message(f"❌ Unknown item: {item}", ephemeral=True)
+                                return
+                            await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, -total_price)
+                            try:
+                                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                c = conn.cursor()
+                                c.execute('''INSERT INTO user_items (guild_id, user_id, item_type, count)
+                                             VALUES (?, ?, ?, ?)
+                                             ON CONFLICT(guild_id, user_id, item_type)
+                                             DO UPDATE SET count = count + ?''',
+                                          (interaction.guild_id, modal_interaction.user.id, item_type_map[item], qty, qty))
+                                conn.commit()
+                                conn.close()
+                            except Exception as e:
+                                await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, total_price)
+                                await modal_interaction.response.send_message(f"❌ Failed to add item: {e}", ephemeral=True)
+                                return
+                            embed = discord.Embed(
+                                title="✅ Usable Items Purchased!",
+                                description=f"{item_info['emoji']} **{qty}x {item_info['name']}** added to inventory!\n\n"
+                                            f"**Total Cost:** {total_price:,} 🪙\n"
+                                            f"**New Balance:** {int(balance - total_price):,} 🪙\n\n"
+                                            f"💡 Use the button in `/inventory` to activate them!",
+                                color=discord.Color.green()
+                            )
+                            await modal_interaction.response.send_message(embed=embed, ephemeral=False)
 
-                await interaction.response.send_modal(QuantityModal())
+                        elif category == 'consumable':
+                            consumable_hints = {
+                                'mystery_box': "Open it in `/inventory` to get a random item!",
+                                'dice_of_fate': "Roll it in `/inventory` for a random effect!",
+                                'fast_travel_scroll': "Used automatically when starting `/adventure`!",
+                                'double_loot_bag': "Used automatically when starting `/adventure`!",
+                                'war_drum': "Auto-consumed on your next raid attack for +10% damage!",
+                                'shield_rune': "Auto-consumed to give consolation coins if your raid tier escapes!",
+                                'server_trophy': "Displayed as trophies in your `/stats` profile!",
+                            }
+                            hint = consumable_hints.get(item, "Use it from `/inventory`!")
+                            await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, -total_price)
+                            try:
+                                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                c = conn.cursor()
+                                c.execute('''INSERT INTO user_items (guild_id, user_id, item_type, count)
+                                             VALUES (?, ?, ?, ?)
+                                             ON CONFLICT(guild_id, user_id, item_type)
+                                             DO UPDATE SET count = count + ?''',
+                                          (interaction.guild_id, modal_interaction.user.id, item, qty, qty))
+                                conn.commit()
+                                conn.close()
+                            except Exception as e:
+                                await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, total_price)
+                                await modal_interaction.response.send_message(f"❌ Failed to add item: {e}", ephemeral=True)
+                                return
+                            embed = discord.Embed(
+                                title="✅ Item Purchased!",
+                                description=f"{item_info['emoji']} **{qty}x {item_info['name']}** added to inventory!\n\n"
+                                            f"**Total Cost:** {total_price:,} 🪙\n"
+                                            f"**New Balance:** {int(balance - total_price):,} 🪙\n\n"
+                                            f"💡 {hint}",
+                                color=discord.Color.green()
+                            )
+                            await modal_interaction.response.send_message(embed=embed, ephemeral=False)
 
-        class ShopView(discord.ui.View):
+                    except ValueError:
+                        await modal_interaction.response.send_message("❌ Please enter a valid number!", ephemeral=True)
+
+            await sel_interaction.response.send_modal(QuantityModal())
+
+        # ── Views ────────────────────────────────────────────────────────────
+        class CategorySelect(discord.ui.Select):
+            def __init__(self, cat_key: str):
+                self._cat_key = cat_key
+                super().__init__(
+                    placeholder="Choose an item to buy...",
+                    options=categories[cat_key]['options'],
+                    row=0
+                )
+
+            async def callback(self, cb_interaction: discord.Interaction):
+                await handle_purchase(cb_interaction, self.values[0])
+
+        class CategoryView(discord.ui.View):
+            def __init__(self, cat_key: str):
+                super().__init__(timeout=300)
+                self.add_item(CategorySelect(cat_key))
+
+            @discord.ui.button(label="← Back to Categories", style=discord.ButtonStyle.secondary, row=1)
+            async def back_button(self, btn_interaction: discord.Interaction, button: discord.ui.Button):
+                ud = get_user(btn_interaction.guild_id, btn_interaction.user.id)
+                await btn_interaction.response.edit_message(
+                    embed=build_main_embed(ud[2]),
+                    view=ShopMainView()
+                )
+
+        class MainCategorySelect(discord.ui.Select):
+            def __init__(self):
+                options = [
+                    discord.SelectOption(
+                        label=cat['label'],
+                        emoji=cat['emoji'],
+                        description=cat['description'][:50],
+                        value=cat_key
+                    )
+                    for cat_key, cat in categories.items()
+                ]
+                super().__init__(placeholder="Choose a category...", options=options)
+
+            async def callback(self, cb_interaction: discord.Interaction):
+                cat_key = self.values[0]
+                ud = get_user(cb_interaction.guild_id, cb_interaction.user.id)
+                await cb_interaction.response.edit_message(
+                    embed=build_category_embed(cat_key, ud[2]),
+                    view=CategoryView(cat_key)
+                )
+
+        class ShopMainView(discord.ui.View):
             def __init__(self):
                 super().__init__(timeout=300)
-                self.add_item(UnifiedShopSelect())
+                self.add_item(MainCategorySelect())
 
-        view = ShopView()
-        await interaction.followup.send(embed=embed, view=view, ephemeral=False)
+        await interaction.followup.send(embed=build_main_embed(balance), view=ShopMainView(), ephemeral=False)
 
     # ==================== DAILY ====================
 

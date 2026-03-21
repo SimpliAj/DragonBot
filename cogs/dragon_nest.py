@@ -400,16 +400,17 @@ class DragonNestCog(commands.Cog):
                         conn.commit()
                         conn.close()
 
-                        if current_level < 10:
-                            new_selected_perks = generate_unique_perks(current_level + 1, 3, 0)
-                            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
-                            c = conn.cursor()
-                            c.execute('''INSERT OR REPLACE INTO pending_perks (guild_id, user_id, level, perks_json)
-                                         VALUES (?, ?, ?, ?)''',
-                                      (self.guild_id, self.user_id, current_level + 1, json.dumps({'selected_perks': new_selected_perks})))
-                            conn.commit()
-                            conn.close()
+                        perk_store_level = current_level + 1 if current_level < 10 else 10
+                        new_selected_perks = generate_unique_perks(perk_store_level, 3, 0)
+                        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                        c = conn.cursor()
+                        c.execute('''INSERT OR REPLACE INTO pending_perks (guild_id, user_id, level, perks_json)
+                                     VALUES (?, ?, ?, ?)''',
+                                  (self.guild_id, self.user_id, perk_store_level, json.dumps({'selected_perks': new_selected_perks})))
+                        conn.commit()
+                        conn.close()
 
+                        if current_level < 10:
                             await btn_interaction.followup.send(
                                 f"✨ **Level {self.level} Unlocked!**\n"
                                 f"🎁 A new perk is waiting for you! Use `/dragonnest` to claim it.",
@@ -418,7 +419,8 @@ class DragonNestCog(commands.Cog):
                         else:
                             await btn_interaction.followup.send(
                                 f"🏆 **Max Level Reached!**\n"
-                                f"You've reached the maximum Dragon Nest level!",
+                                f"You've reached the maximum Dragon Nest level!\n"
+                                f"🎁 Your final perk is waiting! Use `/dragonnest` to claim it.",
                                 ephemeral=False
                             )
 
@@ -732,15 +734,6 @@ class DragonNestCog(commands.Cog):
                 view_perks_button.callback = self.view_perks
                 self.add_item(view_perks_button)
 
-                upgrade_button = discord.ui.Button(
-                    label="Upgrade Dragon Nest",
-                    style=discord.ButtonStyle.primary,
-                    emoji="⬆️",
-                    custom_id="upgrade_nest"
-                )
-                upgrade_button.callback = self.upgrade_nest
-                self.add_item(upgrade_button)
-
                 help_btn = discord.ui.Button(
                     label="Help",
                     style=discord.ButtonStyle.gray,
@@ -757,11 +750,30 @@ class DragonNestCog(commands.Cog):
                 result = c.fetchone()
                 upgrade_level_val = result[0] if result else 0
 
+                c.execute('SELECT balance FROM users WHERE guild_id = ? AND user_id = ?',
+                          (guild_id, user_id))
+                bal_row = c.fetchone()
+                balance_val = bal_row[0] if bal_row else 0
+
                 c.execute('SELECT COUNT(*) FROM active_perks WHERE guild_id = ? AND user_id = ?',
                           (guild_id, user_id))
                 active_perks_count = c.fetchone()[0]
 
                 conn.close()
+
+                next_upgrade_level = upgrade_level_val + 1
+                upgrade_cost = DRAGONNEST_UPGRADES.get(next_upgrade_level, {}).get('cost', 0)
+                can_afford_upgrade = upgrade_level_val < 5 and upgrade_cost > 0 and balance_val >= upgrade_cost
+
+                if can_afford_upgrade:
+                    upgrade_button = discord.ui.Button(
+                        label="Upgrade Dragon Nest",
+                        style=discord.ButtonStyle.primary,
+                        emoji="⬆️",
+                        custom_id="upgrade_nest"
+                    )
+                    upgrade_button.callback = self.upgrade_nest
+                    self.add_item(upgrade_button)
 
                 if upgrade_level_val > 0 and active_perks_count == 0:
                     select_perk_button = discord.ui.Button(
@@ -1020,6 +1032,108 @@ class DragonNestCog(commands.Cog):
                         color=discord.Color.gold()
                     )
                     embed.set_footer(text=f"Missing perks: {missing_level_perks}")
+
+                    class MissingPerkSelectionView(discord.ui.View):
+                        def __init__(self, guild_id, user_id, perks, level, total_missing):
+                            super().__init__(timeout=180)
+                            self.guild_id = guild_id
+                            self.user_id = user_id
+                            self.perks = perks
+                            self.level = level
+                            self.total_missing = total_missing
+
+                            rarity_emoji = {"common": "⚪", "uncommon": "🟢", "rare": "🔵", "epic": "🟣", "legendary": "🟡"}
+                            for i, (rarity, perk) in enumerate(perks, 1):
+                                button = discord.ui.Button(
+                                    label=f"{i}",
+                                    style=discord.ButtonStyle.primary if rarity in ['common', 'uncommon'] else discord.ButtonStyle.success if rarity == 'rare' else discord.ButtonStyle.danger if rarity == 'epic' else discord.ButtonStyle.blurple,
+                                    custom_id=f"claim_perk_r_{guild_id}_{user_id}_{level}_{i}"
+                                )
+                                button.callback = self.create_callback(i-1, rarity, perk)
+                                self.add_item(button)
+
+                        def create_callback(self, index, rarity, perk):
+                            async def callback(btn_interaction: discord.Interaction):
+                                if btn_interaction.user.id != self.user_id:
+                                    await btn_interaction.response.send_message("This is not your selection!", ephemeral=False)
+                                    return
+
+                                try:
+                                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                    c = conn.cursor()
+
+                                    c.execute('''INSERT OR IGNORE INTO user_perks (guild_id, user_id, perk_id, perk_name, perk_effect, perk_value, rarity)
+                                                 VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                                              (self.guild_id, self.user_id, perk['id'], perk['name'],
+                                               perk['effect'], perk.get('value', 0), rarity))
+
+                                    c.execute('DELETE FROM pending_perks WHERE guild_id = ? AND user_id = ? AND level = ?',
+                                              (self.guild_id, self.user_id, self.level))
+
+                                    c.execute('SELECT COUNT(*) FROM user_perks WHERE guild_id = ? AND user_id = ?',
+                                              (self.guild_id, self.user_id))
+                                    new_count = c.fetchone()[0]
+
+                                    c.execute('SELECT level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
+                                              (self.guild_id, self.user_id))
+                                    current_level = c.fetchone()[0]
+
+                                    c.execute('SELECT upgrade_level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
+                                              (self.guild_id, self.user_id))
+                                    upg_res = c.fetchone()
+                                    upg_level = upg_res[0] if upg_res else 0
+
+                                    conn.commit()
+                                    conn.close()
+
+                                    remaining = current_level - new_count
+                                    rarity_emoji = {"common": "⚪", "uncommon": "🟢", "rare": "🔵", "epic": "🟣", "legendary": "🟡"}
+
+                                    if remaining > 0:
+                                        next_level = new_count + 1
+
+                                        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                        c = conn.cursor()
+                                        c.execute('SELECT perks_json FROM pending_perks WHERE guild_id = ? AND user_id = ? AND level = ?',
+                                                  (self.guild_id, self.user_id, next_level))
+                                        stored_next = c.fetchone()
+                                        conn.close()
+
+                                        if stored_next:
+                                            stored_data = json.loads(stored_next[0])
+                                            if isinstance(stored_data, dict) and 'selected_perks' in stored_data:
+                                                next_perks = stored_data['selected_perks']
+                                            else:
+                                                next_perks = stored_data if isinstance(stored_data, list) else []
+                                        else:
+                                            next_perks = generate_unique_perks(next_level, 3, upg_level)
+                                            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                            c = conn.cursor()
+                                            c.execute('''INSERT OR REPLACE INTO pending_perks (guild_id, user_id, level, perks_json)
+                                                         VALUES (?, ?, ?, ?)''',
+                                                      (self.guild_id, self.user_id, next_level, json.dumps({'selected_perks': next_perks})))
+                                            conn.commit()
+                                            conn.close()
+
+                                        perk_text = ""
+                                        for i, (r, p) in enumerate(next_perks, 1):
+                                            perk_text += f"{i}. {rarity_emoji.get(r, '⚪')} **{p['name']}** ({r.capitalize()})\n   *{p['effect']}*\n\n"
+
+                                        next_embed = discord.Embed(
+                                            title=f"🎁 Claim Missing Perk - Level {next_level}",
+                                            description=perk_text + "Select a perk to claim!",
+                                            color=discord.Color.gold()
+                                        )
+                                        next_embed.set_footer(text=f"Missing perks: {remaining - 1}")
+
+                                        await btn_interaction.response.send_message(embed=next_embed, view=MissingPerkSelectionView(self.guild_id, self.user_id, next_perks, next_level, remaining - 1), ephemeral=False)
+                                    else:
+                                        await btn_interaction.response.send_message("🎉 You've claimed all missing perks!", ephemeral=False)
+                                except Exception as e:
+                                    await btn_interaction.response.send_message(f"❌ Error claiming perk: {str(e)}", ephemeral=True)
+                                    traceback.print_exc()
+
+                            return callback
 
                     view = MissingPerkSelectionView(interaction.guild_id, interaction.user.id, selected_perks, first_missing_level, missing_level_perks)
                     await interaction.followup.send(embed=embed, view=view, ephemeral=False)
@@ -1905,12 +2019,18 @@ class DragonNestCog(commands.Cog):
                                 activated_count = 0
 
                                 for perk_id, perk_name, perk_effect, perk_value, rarity in self.perks:
+                                    actual_perk_type = 'lucky'
+                                    for _rarity_tier, _perk_list in PERKS_POOL.items():
+                                        for _p in _perk_list:
+                                            if _p['id'] == perk_id:
+                                                actual_perk_type = _p.get('type', 'lucky')
+                                                break
                                     c.execute('''INSERT INTO active_perks (guild_id, user_id, perk_id, perk_name, perk_effect, perk_value, perk_type, expires_at)
                                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                                                  ON CONFLICT(guild_id, user_id, perk_id)
                                                  DO UPDATE SET expires_at = ?''',
                                               (self.guild_id, self.user_id, perk_id, perk_name,
-                                               perk_effect, perk_value, 'lucky', expires_at, expires_at))
+                                               perk_effect, perk_value, actual_perk_type, expires_at, expires_at))
                                     activated_count += 1
 
                                 c.execute('UPDATE dragon_nest SET perks_activated_at_current_level = ? WHERE guild_id = ? AND user_id = ?',
@@ -1950,7 +2070,7 @@ class DragonNestCog(commands.Cog):
 
                                         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
                                         c = conn.cursor()
-                                        c.execute('SELECT level, xp, bounties_completed, bounties_active FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
+                                        c.execute('SELECT level, xp, bounties_completed, bounties_active, upgrade_level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
                                                   (self.guild_id, self.user_id))
                                         result = c.fetchone()
 
@@ -1962,9 +2082,11 @@ class DragonNestCog(commands.Cog):
                                         level = result[0] if result else 0
                                         bounties_completed = result[2] if result else 0
                                         bounties_active_data = result[3] if result else None
+                                        upgrade_level = result[4] if result else 0
 
                                         level_name = LEVEL_NAMES.get(level, "Unknown")
                                         character = LEVEL_CHARACTERS.get(level, "None")
+                                        lore_text = LEVEL_LORE.get(level, "Your journey continues...")
 
                                         current_time = int(time.time())
                                         is_active = active_result and active_result[0] > current_time
@@ -1975,9 +2097,13 @@ class DragonNestCog(commands.Cog):
 
                                         embed = discord.Embed(
                                             title=f"🏰 {username}'s Dragon Nest",
-                                            description=f"**Level {level}: {level_name}**\n*{character}*",
+                                            description=f"**Level {level}: {level_name}** | Upgrade Tier: {upgrade_level}/5\n*{character}*\n\n✨ {lore_text}",
                                             color=discord.Color.green() if is_active else discord.Color.purple()
                                         )
+
+                                        thumbnail_url = LEVEL_THUMBNAILS.get(level)
+                                        if thumbnail_url:
+                                            embed.set_thumbnail(url=thumbnail_url)
 
                                         embed.add_field(name="Total Bounties Completed", value=str(bounties_completed), inline=True)
                                         embed.add_field(name="Current Level", value=f"{level}/10", inline=True)
@@ -2044,7 +2170,7 @@ class DragonNestCog(commands.Cog):
 
                         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
                         c = conn.cursor()
-                        c.execute('SELECT level, xp, bounties_completed, bounties_active FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
+                        c.execute('SELECT level, xp, bounties_completed, bounties_active, upgrade_level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
                                   (self.guild_id, self.user_id))
                         result = c.fetchone()
 
@@ -2056,9 +2182,11 @@ class DragonNestCog(commands.Cog):
                         level = result[0] if result else 0
                         bounties_completed = result[2] if result else 0
                         bounties_active_data = result[3] if result else None
+                        upgrade_level = result[4] if result else 0
 
                         level_name = LEVEL_NAMES.get(level, "Unknown")
                         character = LEVEL_CHARACTERS.get(level, "None")
+                        lore_text = LEVEL_LORE.get(level, "Your journey continues...")
 
                         current_time = int(time.time())
                         is_active = active_result and active_result[0] > current_time
@@ -2069,9 +2197,13 @@ class DragonNestCog(commands.Cog):
 
                         embed = discord.Embed(
                             title=f"🏰 {username}'s Dragon Nest",
-                            description=f"**Level {level}: {level_name}**\n*{character}*",
+                            description=f"**Level {level}: {level_name}** | Upgrade Tier: {upgrade_level}/5\n*{character}*\n\n✨ {lore_text}",
                             color=discord.Color.green() if is_active else discord.Color.purple()
                         )
+
+                        thumbnail_url = LEVEL_THUMBNAILS.get(level)
+                        if thumbnail_url:
+                            embed.set_thumbnail(url=thumbnail_url)
 
                         embed.add_field(name="Total Bounties Completed", value=str(bounties_completed), inline=True)
                         embed.add_field(name="Current Level", value=f"{level}/10", inline=True)
@@ -2124,7 +2256,81 @@ class DragonNestCog(commands.Cog):
                                 "• Gather resources to upgrade your nest tier",
                     color=discord.Color.blue()
                 )
-                await interaction.response.send_message(embed=help_embed, ephemeral=False)
+
+                outer_view = self
+
+                class HelpBackView(discord.ui.View):
+                    def __init__(self):
+                        super().__init__(timeout=180)
+
+                    @discord.ui.button(label="Back", style=discord.ButtonStyle.gray, emoji="◀️")
+                    async def back_button(self, btn_interaction: discord.Interaction, button: discord.ui.Button):
+                        if btn_interaction.user.id != outer_view.user_id:
+                            await btn_interaction.response.send_message("This is not your menu!", ephemeral=True)
+                            return
+
+                        await btn_interaction.response.defer()
+
+                        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                        c = conn.cursor()
+                        c.execute('SELECT level, xp, bounties_completed, bounties_active, upgrade_level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
+                                  (outer_view.guild_id, outer_view.user_id))
+                        result = c.fetchone()
+                        c.execute('SELECT active_until FROM dragon_nest_active WHERE guild_id = ? AND user_id = ?',
+                                  (outer_view.guild_id, outer_view.user_id))
+                        active_result = c.fetchone()
+                        conn.close()
+
+                        level = result[0] if result else 0
+                        bounties_completed = result[2] if result else 0
+                        bounties_active_data = result[3] if result else None
+                        upgrade_level = result[4] if result else 0
+
+                        current_time = int(time.time())
+                        is_active = active_result and active_result[0] > current_time
+                        time_left = (active_result[0] - current_time) if is_active else 0
+
+                        level_name = LEVEL_NAMES.get(level, "Unknown")
+                        character = LEVEL_CHARACTERS.get(level, "None")
+                        lore_text = LEVEL_LORE.get(level, "Your journey continues...")
+
+                        user = await btn_interaction.client.fetch_user(outer_view.user_id)
+                        username = user.display_name if user else "Unknown"
+
+                        embed = discord.Embed(
+                            title=f"🏰 {username}'s Dragon Nest",
+                            description=f"**Level {level}: {level_name}** | Upgrade Tier: {upgrade_level}/5\n*{character}*\n\n✨ {lore_text}",
+                            color=discord.Color.green() if is_active else discord.Color.purple()
+                        )
+
+                        thumbnail_url = LEVEL_THUMBNAILS.get(level)
+                        if thumbnail_url:
+                            embed.set_thumbnail(url=thumbnail_url)
+
+                        embed.add_field(name="Total Bounties Completed", value=str(bounties_completed), inline=True)
+                        embed.add_field(name="Current Level", value=f"{level}/10", inline=True)
+
+                        if is_active and bounties_active_data:
+                            bounties = ast.literal_eval(bounties_active_data)
+                            bounty_text = ""
+                            for i, bounty in enumerate(bounties, 1):
+                                progress = bounty['progress']
+                                target = bounty['target']
+                                if bounty['type'] == 'catch_any':
+                                    bounty_text += f"📋 **Bounty {i}:** Catch {target} dragons ({progress}/{target})\n"
+                                elif bounty['type'] == 'catch_rarity_or_higher':
+                                    rarity_names = {1: 'Uncommon', 2: 'Rare', 3: 'Epic', 4: 'Legendary', 5: 'Mythic'}
+                                    rarity_name = rarity_names.get(bounty.get('rarity_level'), 'Rare')
+                                    bounty_text += f"📋 **Bounty {i}:** Catch {target} {rarity_name}+ dragons ({progress}/{target})\n"
+                            embed.add_field(name="🎯 Active Bounties", value=bounty_text, inline=False)
+                            embed.add_field(name="⏰ Time Remaining", value=format_time_remaining(time_left), inline=False)
+
+                        embed.set_footer(text="Activate Dragon Nest to start bounties!")
+
+                        new_view = DragonNestView(is_active=is_active, guild_id=outer_view.guild_id, user_id=outer_view.user_id, current_level=level)
+                        await btn_interaction.followup.edit_message(message_id=btn_interaction.message.id, embed=embed, view=new_view)
+
+                await interaction.response.edit_message(embed=help_embed, view=HelpBackView())
 
         view = DragonNestView(is_active=is_active, guild_id=interaction.guild_id, user_id=interaction.user.id, current_level=level)
         await interaction.followup.send(embed=embed, view=view, ephemeral=False)

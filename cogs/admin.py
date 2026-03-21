@@ -312,7 +312,11 @@ async def handle_dev_command(message, command, args):
 
         await asyncio.sleep(1)
         from cogs.events import spawn_dragon
-        await spawn_dragon(guild_id, message.channel, message._state._get_client())
+        client = message._state._get_client()
+        channel_id = spawn_channels.get(guild_id)
+        real_channel = client.get_channel(channel_id) if channel_id else None
+        if real_channel:
+            await spawn_dragon(guild_id, real_channel, client)
 
         try:
             dm_embed = discord.Embed(
@@ -1854,5 +1858,91 @@ def _build_config_embed(guild_id: int) -> discord.Embed:
     return embed
 
 
+# ==================== ADMIN PANEL ====================
+
+def _admin_panel_embed() -> discord.Embed:
+    embed = discord.Embed(
+        title="🛡️ Admin Panel",
+        description="Reset user data on this server.\nSelect an operation below.",
+        color=discord.Color.orange(),
+    )
+    embed.set_footer(text="Only affects users in this server.")
+    return embed
+
+
+class AdminUserResetView(discord.ui.View):
+    """View with a UserSelect to pick the target, then executes the reset."""
+
+    def __init__(self, bot, command: str, action_label: str):
+        super().__init__(timeout=120)
+        self.bot = bot
+        self.command = command
+        self.action_label = action_label
+
+    @discord.ui.select(cls=discord.ui.UserSelect, placeholder="Select user to reset...", row=0)
+    async def user_select(self, interaction: discord.Interaction, select: discord.ui.UserSelect):
+        user = select.values[0]
+        await interaction.response.defer(ephemeral=True)
+        from cogs.devpanel import _run
+        from cogs.devpanel import FakeMessage
+
+        msg = FakeMessage(interaction, self.bot, mentions=[user])
+        from cogs.admin import handle_dev_command
+        await handle_dev_command(msg, self.command, [])
+        await interaction.followup.send(
+            f"✅ **{self.action_label}** reset for {user.mention}.", ephemeral=True
+        )
+
+    @discord.ui.button(label="← Back", style=discord.ButtonStyle.gray, row=1)
+    async def back(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=_admin_panel_embed(), view=AdminPanelView(self.bot))
+
+
+class AdminPanelView(discord.ui.View):
+    def __init__(self, bot):
+        super().__init__(timeout=300)
+        self.bot = bot
+
+    @discord.ui.button(label="Reset Perks", emoji="🔄", style=discord.ButtonStyle.danger, row=0)
+    async def reset_perks(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            embed=discord.Embed(title="🔄 Reset Perks", description="Select the user whose Dragon Nest perks should be reset.", color=discord.Color.orange()),
+            view=AdminUserResetView(self.bot, 'reset-perks', 'Perks')
+        )
+
+    @discord.ui.button(label="Reset Inventory", emoji="🗑️", style=discord.ButtonStyle.danger, row=0)
+    async def reset_inventory(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            embed=discord.Embed(title="🗑️ Reset Inventory", description="Select the user whose inventory should be reset.", color=discord.Color.orange()),
+            view=AdminUserResetView(self.bot, 'resetinventory', 'Inventory')
+        )
+
+    @discord.ui.button(label="Reset Breed CD", emoji="⏱️", style=discord.ButtonStyle.secondary, row=0)
+    async def reset_breed_cd(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            embed=discord.Embed(title="⏱️ Reset Breed Cooldown", description="Select the user whose breeding cooldown should be reset.", color=discord.Color.orange()),
+            view=AdminUserResetView(self.bot, 'resetbreedcooldown', 'Breed Cooldown')
+        )
+
+
+class AdminCogExtra(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    @app_commands.command(name="adminpanel", description="Admin panel for server management (Admins only)")
+    async def adminpanel(self, interaction: discord.Interaction):
+        is_dev = interaction.user.id == DEV_USER_ID
+        is_admin = interaction.user.guild_permissions.administrator
+        if not is_dev and not is_admin:
+            await interaction.response.send_message(
+                "❌ You need Administrator permissions to use this.", ephemeral=True
+            )
+            return
+        await interaction.response.send_message(
+            embed=_admin_panel_embed(), view=AdminPanelView(self.bot), ephemeral=True
+        )
+
+
 async def setup(bot):
     await bot.add_cog(AdminCog(bot))
+    await bot.add_cog(AdminCogExtra(bot))

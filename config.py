@@ -348,14 +348,20 @@ ADVENTURE_TYPES = {
 
 # Adventure item rewards
 ADVENTURE_ITEMS = {
-    'dragonscale': {'name': 'Dragonscale', 'emoji': '🟪', 'min_duration': 1, 'max_duration': 5},  # 1-5 minutes
-    'lucky_charm': {'name': 'Lucky Charm', 'emoji': '🍀', 'min_duration': 30, 'max_duration': 30},  # 30 minutes
+    'dragonscale':       {'name': 'Dragonscale',       'emoji': '🟪', 'min_duration': 1,  'max_duration': 5,  'weight': 40, 'type': 'dragonscale'},
+    'lucky_charm':       {'name': 'Lucky Charm',       'emoji': '🍀', 'min_duration': 30, 'max_duration': 30, 'weight': 25, 'type': 'luckycharm'},
+    'mystery_box':       {'name': 'Mystery Box',       'emoji': '❓',                                         'weight': 15, 'type': 'item'},
+    'dice_of_fate':      {'name': 'Dice of Fate',      'emoji': '🎲',                                         'weight': 12, 'type': 'item'},
+    'fast_travel_scroll':{'name': 'Fast Travel Scroll','emoji': '📜',                                         'weight': 10, 'type': 'item'},
+    'war_drum':          {'name': 'War Drum',          'emoji': '🥁',                                         'weight':  8, 'type': 'item'},
+    'double_loot_bag':   {'name': 'Double Loot Bag',   'emoji': '🎒',                                         'weight':  5, 'type': 'item'},
 }
 
 # New Usable Items (Active use, time-based)
 USABLE_ITEMS = {
     'night_vision': {'name': 'Night Vision', 'emoji': '🌙', 'rarity': 'legendary', 'duration': 30 * 60, 'effect': '+50% rarity (20:00-08:00 only, once per night)', 'shop_cost': 750},
     'lucky_dice': {'name': 'Lucky Dice', 'emoji': '🎰', 'rarity': 'rare', 'duration': 30 * 60, 'effect': '+10% casino/gamble win chance', 'shop_cost': 300},
+    'gold_rush': {'name': 'Gold Rush', 'emoji': '✨', 'rarity': 'rare', 'duration': 60 * 60, 'effect': '+50% coin drops when catching dragons (1h)', 'shop_cost': 8000},
 }
 
 # Passive Enchanter Items (Always active when owned)
@@ -381,6 +387,73 @@ BLACK_MARKET_ITEMS = {
     'lucky_dice': {'name': 'Lucky Dice', 'shop_price': 10000, 'black_price': 7500, 'emoji': '🎰', 'type': 'item'},
     'night_vision': {'name': 'Night Vision', 'shop_price': 50000, 'black_price': 37500, 'emoji': '🌙', 'type': 'item'},
 }
+
+# ==================== CONSUMABLE ITEMS ====================
+CONSUMABLE_ITEMS = {
+    'war_drum': {
+        'name': 'War Drum', 'emoji': '🥁', 'rarity': 'rare',
+        'description': '+10% Raid damage for your next attack (auto-consumed)',
+        'shop_cost': 4000,
+    },
+    'shield_rune': {
+        'name': 'Shield Rune', 'emoji': '🔷', 'rarity': 'rare',
+        'description': 'Get 300 coins consolation if your Raid tier escapes',
+        'shop_cost': 3500,
+    },
+    'server_trophy': {
+        'name': 'Server Trophy', 'emoji': '🥇', 'rarity': 'legendary',
+        'description': 'Cosmetic — displayed in your /stats profile',
+        'shop_cost': 25000,
+    },
+    'mystery_box': {
+        'name': 'Mystery Box', 'emoji': '❓', 'rarity': 'rare',
+        'description': 'Contains a random item — could be anything!',
+        'shop_cost': 5000,
+    },
+    'dice_of_fate': {
+        'name': 'Dice of Fate', 'emoji': '🎲', 'rarity': 'rare',
+        'description': 'Roll for a random effect — fortune or misfortune!',
+        'shop_cost': 3000,
+    },
+    'fast_travel_scroll': {
+        'name': 'Fast Travel Scroll', 'emoji': '📜', 'rarity': 'uncommon',
+        'description': 'Halves the duration of your next adventure',
+        'shop_cost': 8000,
+    },
+    'double_loot_bag': {
+        'name': 'Double Loot Bag', 'emoji': '🎒', 'rarity': 'rare',
+        'description': 'Doubles item drops from your next adventure',
+        'shop_cost': 6000,
+    },
+}
+
+# Mystery Box: weighted reward pool
+# Each entry: type + weight + relevant fields
+MYSTERY_BOX_POOL = [
+    {'type': 'coins',      'amount': (500,  2000),  'weight': 25, 'emoji': '💰', 'label': '{amount} coins'},
+    {'type': 'coins',      'amount': (2000, 8000),  'weight': 10, 'emoji': '💰', 'label': '{amount} coins'},
+    {'type': 'luckycharm',                          'weight': 18, 'emoji': '🍀', 'label': 'Lucky Charm'},
+    {'type': 'item',       'item_type': 'fast_travel_scroll', 'weight': 14, 'emoji': '📜', 'label': 'Fast Travel Scroll'},
+    {'type': 'item',       'item_type': 'double_loot_bag',    'weight': 10, 'emoji': '🎒', 'label': 'Double Loot Bag'},
+    {'type': 'item',       'item_type': 'dice_of_fate',       'weight':  8, 'emoji': '🎲', 'label': 'Dice of Fate'},
+    {'type': 'pack',       'pack_type': 'pack_wooden',        'weight': 14, 'emoji': '<:woodenchest:1446170002708238476>', 'label': 'Wooden Pack'},
+    {'type': 'pack',       'pack_type': 'pack_stone',         'weight':  8, 'emoji': '<:stonechest:1446169958265389247>', 'label': 'Stone Pack'},
+    {'type': 'dragonscale','minutes':   (5, 15),              'weight': 12, 'emoji': '🟪', 'label': '{minutes}min Dragonscale'},
+    {'type': 'item',       'item_type': 'lucky_dice',         'weight':  5, 'emoji': '🎰', 'label': 'Lucky Dice'},
+    {'type': 'item',       'item_type': 'night_vision',       'weight':  3, 'emoji': '🌙', 'label': 'Night Vision'},
+]
+
+# Dice of Fate: weighted effect pool
+DICE_OF_FATE_EFFECTS = [
+    {'type': 'coins_gain', 'amount': (1000, 5000),  'weight': 20, 'emoji': '💰', 'label': 'You found a coin stash! +{amount} coins'},
+    {'type': 'coins_gain', 'amount': (5000, 20000), 'weight':  8, 'emoji': '🤑', 'label': 'Jackpot! Coins rain from the sky! +{amount} coins'},
+    {'type': 'coins_loss', 'amount': (500,  2000),  'weight': 15, 'emoji': '💸', 'label': 'A thieving goblin steals {amount} coins!'},
+    {'type': 'luckycharm',                          'weight': 12, 'emoji': '🍀', 'label': 'A Lucky Charm materializes in your hands!'},
+    {'type': 'item',       'item_type': 'fast_travel_scroll', 'weight': 10, 'emoji': '📜', 'label': 'A mystical scroll unfurls before you!'},
+    {'type': 'item',       'item_type': 'double_loot_bag',    'weight':  8, 'emoji': '🎒', 'label': 'A mysterious bag drops into your lap!'},
+    {'type': 'dragonscale','minutes':   (3, 10),              'weight': 15, 'emoji': '🟪', 'label': 'Dragon energy surges! +{minutes}min Dragonscale'},
+    {'type': 'nothing',                             'weight': 12, 'emoji': '💨', 'label': 'Nothing happens... The dice mocks you.'},
+]
 
 LEVEL_BOUNTY_DIFFICULTY = {
     0: 1, 1: 1, 2: 1, 3: 2, 4: 2, 5: 2,

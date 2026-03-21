@@ -346,8 +346,25 @@ class TasksCog(commands.Cog):
                                     if hard_hp > 0 and bool(eval(hard_part_str) if hard_part_str else False):
                                         escaped_tiers.append('hard')
 
-                                    # Send escape message for undefeated tiers
+                                    # Send escape message for undefeated tiers + Shield Rune consolation
                                     if escaped_tiers:
+                                        # Shield Rune: give consolation coins to participants who have one
+                                        SHIELD_RUNE_CONSOLATION = 300
+                                        for escaped_tier in escaped_tiers:
+                                            c.execute(f'SELECT user_id FROM raid_damage WHERE guild_id = ? AND tier = ?',
+                                                      (guild_id, escaped_tier))
+                                            escaped_participants = [row[0] for row in c.fetchall()]
+                                            for uid in escaped_participants:
+                                                c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
+                                                          (guild_id, uid, 'shield_rune'))
+                                                rune_row = c.fetchone()
+                                                if rune_row and rune_row[0] > 0:
+                                                    c.execute('UPDATE users SET balance = balance + ? WHERE guild_id = ? AND user_id = ?',
+                                                              (SHIELD_RUNE_CONSOLATION, guild_id, uid))
+                                                    c.execute('UPDATE user_items SET count = count - 1 WHERE guild_id = ? AND user_id = ? AND item_type = ?',
+                                                              (guild_id, uid, 'shield_rune'))
+                                        conn.commit()
+
                                         try:
                                             c_settings = conn.cursor()
                                             c_settings.execute('SELECT spawn_channel FROM guild_settings WHERE guild_id = ?', (guild_id,))
@@ -361,7 +378,9 @@ class TasksCog(commands.Cog):
 
                                                     embed = discord.Embed(
                                                         title="💀 Raid Boss Escaped!",
-                                                        description=f"The boss escaped before {escaped_text} tier(s) could be defeated!\n\n❌ No rewards for these groups.",
+                                                        description=f"The boss escaped before {escaped_text} tier(s) could be defeated!\n\n"
+                                                                    f"❌ No rewards for these groups.\n"
+                                                                    f"🔷 Players with a **Shield Rune** received {SHIELD_RUNE_CONSOLATION} coins consolation.",
                                                         color=discord.Color.dark_gray()
                                                     )
                                                     await channel.send(embed=embed)
@@ -1647,12 +1666,12 @@ class TasksCog(commands.Cog):
         c = conn.cursor()
 
         # Get all completed adventures that haven't been claimed
-        c.execute('''SELECT adventure_id, guild_id, user_id, dragons_sent, adventure_type, returns_at
+        c.execute('''SELECT adventure_id, guild_id, user_id, dragons_sent, adventure_type, returns_at, double_loot
                      FROM user_adventures
                      WHERE status = 'active' AND returns_at <= ? AND claimed = 0''', (current_time,))
         completed = c.fetchall()
 
-        for adventure_id, guild_id, user_id, dragons_json, adv_type, returns_at in completed:
+        for adventure_id, guild_id, user_id, dragons_json, adv_type, returns_at, double_loot in completed:
             try:
                 # Ensure IDs are integers and handle None values
                 adventure_id = int(adventure_id) if adventure_id else 0
@@ -1712,28 +1731,37 @@ class TasksCog(commands.Cog):
 
                     # Roll for item (separate from dragon)
                     item_chance = adventure_config.get('rewards', {}).get('item_chance', 0.10)
-                    if random.random() < item_chance:
-                        # Got an item!
-                        item_type = random.choice(list(ADVENTURE_ITEMS.keys()))
-                        item_data = ADVENTURE_ITEMS[item_type]
-                        rewards_items.append(item_type)
+                    # Double Loot Bag: roll twice for items
+                    item_rolls = 2 if double_loot else 1
+                    adv_item_keys = list(ADVENTURE_ITEMS.keys())
+                    adv_item_weights = [ADVENTURE_ITEMS[k].get('weight', 10) for k in adv_item_keys]
+                    for _ in range(item_rolls):
+                        if random.random() < item_chance:
+                            # Got an item! Weighted random selection
+                            item_type = random.choices(adv_item_keys, weights=adv_item_weights)[0]
+                            item_data = ADVENTURE_ITEMS[item_type]
+                            rewards_items.append(item_type)
 
-                        # Add item to user inventory (goes to active_perks so they can activate it later)
-                        if item_type == 'dragonscale':
-                            # Calculate random duration for Dragonscale
-                            item_duration_minutes = random.randint(item_data['min_duration'], item_data['max_duration'])
-                            # Add to inventory (dragonscales table)
-                            c.execute('''INSERT OR IGNORE INTO dragonscales (guild_id, user_id, minutes)
-                                        VALUES (?, ?, ?)''', (guild_id, user_id, item_duration_minutes))
-                            c.execute('UPDATE dragonscales SET minutes = minutes + ? WHERE guild_id = ? AND user_id = ?',
-                                     (item_duration_minutes, guild_id, user_id))
+                            item_storage_type = item_data.get('type', 'item')
 
-                        elif item_type == 'lucky_charm':
-                            # Lucky Charms go to inventory (user_luckycharms table)
-                            c.execute('''INSERT OR IGNORE INTO user_luckycharms (guild_id, user_id, count)
-                                        VALUES (?, ?, 1)''', (guild_id, user_id))
-                            c.execute('UPDATE user_luckycharms SET count = count + 1 WHERE guild_id = ? AND user_id = ?',
-                                     (guild_id, user_id))
+                            # Add item to user inventory
+                            if item_storage_type == 'dragonscale':
+                                item_duration_minutes = random.randint(item_data['min_duration'], item_data['max_duration'])
+                                c.execute('''INSERT OR IGNORE INTO dragonscales (guild_id, user_id, minutes)
+                                            VALUES (?, ?, ?)''', (guild_id, user_id, item_duration_minutes))
+                                c.execute('UPDATE dragonscales SET minutes = minutes + ? WHERE guild_id = ? AND user_id = ?',
+                                         (item_duration_minutes, guild_id, user_id))
+
+                            elif item_storage_type == 'luckycharm':
+                                c.execute('''INSERT OR IGNORE INTO user_luckycharms (guild_id, user_id, count)
+                                            VALUES (?, ?, 1)''', (guild_id, user_id))
+                                c.execute('UPDATE user_luckycharms SET count = count + 1 WHERE guild_id = ? AND user_id = ?',
+                                         (guild_id, user_id))
+
+                            elif item_storage_type == 'item':
+                                c.execute('''INSERT INTO user_items (guild_id, user_id, item_type, count) VALUES (?, ?, ?, 1)
+                                             ON CONFLICT(guild_id, user_id, item_type) DO UPDATE SET count = count + 1''',
+                                         (guild_id, user_id, item_type))
 
                     # Success: Set cooldown equal to adventure duration
                     cooldown_duration = adventure_config['duration']

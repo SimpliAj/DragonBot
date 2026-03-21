@@ -3,11 +3,36 @@ cogs/devpanel.py - /devpanel slash command (DEV_USER_ID only).
 Replaces all -db prefix commands with an interactive panel.
 """
 
+import sqlite3
+import time
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from config import DEV_USER_ID
+from config import DEV_USER_ID, DRAGON_TYPES, PACK_TYPES
+
+# ── Select options (built once at import time) ────────────────────────────────
+_DRAGON_OPTIONS = [
+    discord.SelectOption(label=data['name'], value=key, description=key)
+    for key, data in list(DRAGON_TYPES.items())[:25]
+]
+_PACK_OPTIONS = [
+    discord.SelectOption(label=data['name'], value=key)
+    for key, data in PACK_TYPES.items()
+]
+_MINUTES_OPTIONS = [
+    discord.SelectOption(label="5 minutes",   value="5"),
+    discord.SelectOption(label="10 minutes",  value="10"),
+    discord.SelectOption(label="15 minutes",  value="15"),
+    discord.SelectOption(label="30 minutes",  value="30"),
+    discord.SelectOption(label="1 hour",      value="60"),
+    discord.SelectOption(label="2 hours",     value="120"),
+    discord.SelectOption(label="3 hours",     value="180"),
+    discord.SelectOption(label="6 hours",     value="360"),
+    discord.SelectOption(label="12 hours",    value="720"),
+    discord.SelectOption(label="24 hours",    value="1440"),
+]
 
 
 # ── Fake message adapter so we can reuse handle_dev_command ─────────────────
@@ -56,85 +81,90 @@ async def _run(interaction: discord.Interaction, bot: commands.Bot,
 
 # ── Modals ────────────────────────────────────────────────────────────────────
 
-class GiveCoinsModal(discord.ui.Modal, title="Give Coins"):
-    user_id  = discord.ui.TextInput(label="User ID", placeholder="123456789012345678")
-    amount   = discord.ui.TextInput(label="Amount", placeholder="e.g. 10000")
+class _ChangeGuildModal(discord.ui.Modal, title="Change Guild ID"):
+    guild_id = discord.ui.TextInput(label="Guild ID", placeholder="123456789012345678")
 
-    def __init__(self, bot): super().__init__(); self.bot = bot
+    def __init__(self, parent_view):
+        super().__init__()
+        self._parent = parent_view
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            self._parent.guild_id = int(self.guild_id.value)
+            await interaction.response.send_message(
+                f"✅ Guild set to `{self._parent.guild_id}`", ephemeral=True)
+        except ValueError:
+            await interaction.response.send_message("❌ Invalid Guild ID", ephemeral=True)
+
+
+class GiveCoinsAmountModal(discord.ui.Modal, title="Give Coins"):
+    amount = discord.ui.TextInput(label="Amount", placeholder="e.g. 10000")
+
+    def __init__(self, bot, user):
+        super().__init__()
+        self.bot = bot
+        self.user = user
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         try:
-            user = await self.bot.fetch_user(int(self.user_id.value))
             await _run(interaction, self.bot, 'givecoins',
-                       [self.amount.value], mentions=[user])
+                       [self.amount.value], mentions=[self.user])
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 
-class GiveDragonsModal(discord.ui.Modal, title="Give Dragons"):
-    user_id     = discord.ui.TextInput(label="User ID", placeholder="123456789012345678")
-    dragon_type = discord.ui.TextInput(label="Dragon type (or * for all)", placeholder="stone / ember / * ...")
-    amount      = discord.ui.TextInput(label="Amount", placeholder="e.g. 5")
+class GiveDragonsAmountModal(discord.ui.Modal, title="Give Dragons"):
+    amount = discord.ui.TextInput(label="Amount (or * for all types)", placeholder="e.g. 5")
 
-    def __init__(self, bot): super().__init__(); self.bot = bot
+    def __init__(self, bot, user, dragon_type):
+        super().__init__()
+        self.bot = bot
+        self.user = user
+        self.dragon_type = dragon_type
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         try:
-            user = await self.bot.fetch_user(int(self.user_id.value))
             await _run(interaction, self.bot, 'givedragons',
-                       [self.dragon_type.value, self.amount.value], mentions=[user])
+                       [self.dragon_type, self.amount.value], mentions=[self.user])
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 
-class GivePackModal(discord.ui.Modal, title="Give Pack"):
-    guild_id_  = discord.ui.TextInput(label="Guild ID", placeholder="123456789012345678")
-    user_id    = discord.ui.TextInput(label="User ID",  placeholder="123456789012345678")
-    pack_type  = discord.ui.TextInput(label="Pack type", placeholder="wooden / stone / bronze / silver / gold / diamond")
-    amount     = discord.ui.TextInput(label="Amount", placeholder="e.g. 3")
+class GivePackAmountModal(discord.ui.Modal, title="Give Pack"):
+    amount = discord.ui.TextInput(label="Amount", placeholder="e.g. 3")
 
-    def __init__(self, bot): super().__init__(); self.bot = bot
+    def __init__(self, bot, guild_id, user, pack_type):
+        super().__init__()
+        self.bot = bot
+        self.guild_id = guild_id
+        self.user = user
+        self.pack_type = pack_type
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         try:
             await _run(interaction, self.bot, 'givepack',
-                       [self.guild_id_.value, self.user_id.value,
-                        self.pack_type.value, self.amount.value])
+                       [str(self.guild_id), str(self.user.id),
+                        self.pack_type, self.amount.value])
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 
-class GivePremiumModal(discord.ui.Modal, title="Give Premium"):
-    guild_id_ = discord.ui.TextInput(label="Guild ID", placeholder="123456789012345678")
-    user_id   = discord.ui.TextInput(label="User ID",  placeholder="123456789012345678")
-    days      = discord.ui.TextInput(label="Days", placeholder="e.g. 30")
+class GrantPassLevelsModal(discord.ui.Modal, title="Grant Dragonpass Level"):
+    levels = discord.ui.TextInput(label="Levels to grant", placeholder="e.g. 5")
 
-    def __init__(self, bot): super().__init__(); self.bot = bot
-
-    async def on_submit(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        try:
-            await _run(interaction, self.bot, 'givepremium',
-                       [self.guild_id_.value, self.user_id.value, self.days.value])
-        except Exception as e:
-            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
-
-
-class PassGrantModal(discord.ui.Modal, title="Grant Dragonpass Level"):
-    user_id = discord.ui.TextInput(label="User ID", placeholder="123456789012345678")
-    levels  = discord.ui.TextInput(label="Levels to grant", placeholder="e.g. 5")
-
-    def __init__(self, bot): super().__init__(); self.bot = bot
+    def __init__(self, bot, user):
+        super().__init__()
+        self.bot = bot
+        self.user = user
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         try:
-            user = await self.bot.fetch_user(int(self.user_id.value))
             await _run(interaction, self.bot, 'passgrant',
-                       [self.levels.value], mentions=[user])
+                       [self.levels.value], mentions=[self.user])
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
@@ -217,34 +247,212 @@ class FixSoftlockModal(discord.ui.Modal, title="Fix Softlock"):
             await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 
+# ── Give Sub-Views ─────────────────────────────────────────────────────────────
+
+def _give_embed(title: str, color: discord.Color) -> discord.Embed:
+    return discord.Embed(title=title, color=color)
+
+
+class GiveCoinsView(discord.ui.View):
+    def __init__(self, bot):
+        super().__init__(timeout=120)
+        self.bot = bot
+
+    @discord.ui.select(cls=discord.ui.UserSelect, placeholder="Select user…", row=0)
+    async def user_select(self, interaction: discord.Interaction, select: discord.ui.UserSelect):
+        await interaction.response.send_modal(GiveCoinsAmountModal(self.bot, select.values[0]))
+
+    @discord.ui.button(label="← Back", style=discord.ButtonStyle.gray, row=1)
+    async def back(self, interaction: discord.Interaction, _):
+        await interaction.response.edit_message(
+            embed=_give_embed("🎁 Give", discord.Color.green()), view=GiveView(self.bot))
+
+
+class GiveDragonsView(discord.ui.View):
+    def __init__(self, bot):
+        super().__init__(timeout=120)
+        self.bot = bot
+        self.selected_user = None
+        self.selected_dragon = None
+
+    @discord.ui.select(cls=discord.ui.UserSelect, placeholder="Select user…", row=0)
+    async def user_select(self, interaction: discord.Interaction, select: discord.ui.UserSelect):
+        self.selected_user = select.values[0]
+        await interaction.response.defer()
+
+    @discord.ui.select(placeholder="Select dragon type…", options=_DRAGON_OPTIONS, row=1)
+    async def dragon_select(self, interaction: discord.Interaction, select: discord.ui.Select):
+        self.selected_dragon = select.values[0]
+        await interaction.response.defer()
+
+    @discord.ui.button(label="Give", emoji="🐉", style=discord.ButtonStyle.primary, row=2)
+    async def give(self, interaction: discord.Interaction, _):
+        if not self.selected_user or not self.selected_dragon:
+            await interaction.response.send_message(
+                "❌ Select a user and dragon type first.", ephemeral=True)
+            return
+        await interaction.response.send_modal(
+            GiveDragonsAmountModal(self.bot, self.selected_user, self.selected_dragon))
+
+    @discord.ui.button(label="← Back", style=discord.ButtonStyle.gray, row=2)
+    async def back(self, interaction: discord.Interaction, _):
+        await interaction.response.edit_message(
+            embed=_give_embed("🎁 Give", discord.Color.green()), view=GiveView(self.bot))
+
+
+class GivePackView(discord.ui.View):
+    def __init__(self, bot, guild_id: int):
+        super().__init__(timeout=120)
+        self.bot = bot
+        self.guild_id = guild_id
+        self.selected_user = None
+        self.selected_pack = None
+
+    @discord.ui.select(cls=discord.ui.UserSelect, placeholder="Select user…", row=0)
+    async def user_select(self, interaction: discord.Interaction, select: discord.ui.UserSelect):
+        self.selected_user = select.values[0]
+        await interaction.response.defer()
+
+    @discord.ui.select(placeholder="Select pack type…", options=_PACK_OPTIONS, row=1)
+    async def pack_select(self, interaction: discord.Interaction, select: discord.ui.Select):
+        self.selected_pack = select.values[0]
+        await interaction.response.defer()
+
+    @discord.ui.button(label="Give", emoji="📦", style=discord.ButtonStyle.primary, row=2)
+    async def give(self, interaction: discord.Interaction, _):
+        if not self.selected_user or not self.selected_pack:
+            await interaction.response.send_message(
+                "❌ Select a user and pack type first.", ephemeral=True)
+            return
+        await interaction.response.send_modal(
+            GivePackAmountModal(self.bot, self.guild_id, self.selected_user, self.selected_pack))
+
+    @discord.ui.button(label="Change Guild", emoji="🏠", style=discord.ButtonStyle.secondary, row=2)
+    async def change_guild(self, interaction: discord.Interaction, _):
+        await interaction.response.send_modal(_ChangeGuildModal(self))
+
+    @discord.ui.button(label="← Back", style=discord.ButtonStyle.gray, row=3)
+    async def back(self, interaction: discord.Interaction, _):
+        await interaction.response.edit_message(
+            embed=_give_embed("🎁 Give", discord.Color.green()), view=GiveView(self.bot))
+
+
+class GiveDragonscaleView(discord.ui.View):
+    def __init__(self, bot, guild_id: int):
+        super().__init__(timeout=120)
+        self.bot = bot
+        self.guild_id = guild_id
+        self.selected_user = None
+        self.selected_minutes = None
+
+    @discord.ui.select(cls=discord.ui.UserSelect, placeholder="Select user…", row=0)
+    async def user_select(self, interaction: discord.Interaction, select: discord.ui.UserSelect):
+        self.selected_user = select.values[0]
+        await interaction.response.defer()
+
+    @discord.ui.select(placeholder="Select duration…", options=_MINUTES_OPTIONS, row=1)
+    async def minutes_select(self, interaction: discord.Interaction, select: discord.ui.Select):
+        self.selected_minutes = int(select.values[0])
+        await interaction.response.defer()
+
+    @discord.ui.button(label="Give Dragonscale", emoji="🟪", style=discord.ButtonStyle.primary, row=2)
+    async def give(self, interaction: discord.Interaction, _):
+        if not self.selected_user or not self.selected_minutes:
+            await interaction.response.send_message(
+                "❌ Select a user and duration first.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        try:
+            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+            c = conn.cursor()
+            c.execute('SELECT minutes FROM dragonscales WHERE guild_id = ? AND user_id = ?',
+                      (self.guild_id, self.selected_user.id))
+            row = c.fetchone()
+            if row:
+                c.execute('UPDATE dragonscales SET minutes = minutes + ? WHERE guild_id = ? AND user_id = ?',
+                          (self.selected_minutes, self.guild_id, self.selected_user.id))
+            else:
+                c.execute('INSERT INTO dragonscales (guild_id, user_id, minutes) VALUES (?, ?, ?)',
+                          (self.guild_id, self.selected_user.id, self.selected_minutes))
+            conn.commit()
+            conn.close()
+            mins = self.selected_minutes
+            label = f"{mins}m" if mins < 60 else f"{mins // 60}h" + (f" {mins % 60}m" if mins % 60 else "")
+            await interaction.followup.send(
+                f"✅ Gave **{label}** of Dragonscale 🟪 to {self.selected_user.mention}!", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
+    @discord.ui.button(label="Change Guild", emoji="🏠", style=discord.ButtonStyle.secondary, row=2)
+    async def change_guild(self, interaction: discord.Interaction, _):
+        await interaction.response.send_modal(_ChangeGuildModal(self))
+
+    @discord.ui.button(label="← Back", style=discord.ButtonStyle.gray, row=3)
+    async def back(self, interaction: discord.Interaction, _):
+        await interaction.response.edit_message(
+            embed=_give_embed("🎁 Give", discord.Color.green()), view=GiveView(self.bot))
+
+
+class GrantPassView(discord.ui.View):
+    def __init__(self, bot):
+        super().__init__(timeout=120)
+        self.bot = bot
+
+    @discord.ui.select(cls=discord.ui.UserSelect, placeholder="Select user…", row=0)
+    async def user_select(self, interaction: discord.Interaction, select: discord.ui.UserSelect):
+        await interaction.response.send_modal(GrantPassLevelsModal(self.bot, select.values[0]))
+
+    @discord.ui.button(label="← Back", style=discord.ButtonStyle.gray, row=1)
+    async def back(self, interaction: discord.Interaction, _):
+        await interaction.response.edit_message(
+            embed=_give_embed("🎁 Give", discord.Color.green()), view=GiveView(self.bot))
+
+
 # ── Category Views ─────────────────────────────────────────────────────────────
 
 class GiveView(discord.ui.View):
-    def __init__(self, bot): super().__init__(timeout=120); self.bot = bot
+    def __init__(self, bot):
+        super().__init__(timeout=120)
+        self.bot = bot
 
     @discord.ui.button(label="Give Coins", emoji="🪙", style=discord.ButtonStyle.primary)
-    async def give_coins(self, i, _): await i.response.send_modal(GiveCoinsModal(self.bot))
+    async def give_coins(self, interaction: discord.Interaction, _):
+        await interaction.response.edit_message(
+            embed=_give_embed("🪙 Give Coins", discord.Color.gold()),
+            view=GiveCoinsView(self.bot))
 
     @discord.ui.button(label="Give Dragons", emoji="🐉", style=discord.ButtonStyle.primary)
-    async def give_dragons(self, i, _): await i.response.send_modal(GiveDragonsModal(self.bot))
+    async def give_dragons(self, interaction: discord.Interaction, _):
+        await interaction.response.edit_message(
+            embed=_give_embed("🐉 Give Dragons", discord.Color.green()),
+            view=GiveDragonsView(self.bot))
 
     @discord.ui.button(label="Give Pack", emoji="📦", style=discord.ButtonStyle.primary)
-    async def give_pack(self, i, _): await i.response.send_modal(GivePackModal(self.bot))
+    async def give_pack(self, interaction: discord.Interaction, _):
+        await interaction.response.edit_message(
+            embed=_give_embed("📦 Give Pack", discord.Color.blue()),
+            view=GivePackView(self.bot, interaction.guild_id))
 
-    @discord.ui.button(label="Give Premium", emoji="⭐", style=discord.ButtonStyle.primary)
-    async def give_premium(self, i, _): await i.response.send_modal(GivePremiumModal(self.bot))
+    @discord.ui.button(label="Give Dragonscale", emoji="🟪", style=discord.ButtonStyle.primary)
+    async def give_dragonscale(self, interaction: discord.Interaction, _):
+        await interaction.response.edit_message(
+            embed=_give_embed("🟪 Give Dragonscale", discord.Color.purple()),
+            view=GiveDragonscaleView(self.bot, interaction.guild_id))
 
     @discord.ui.button(label="Grant Pass Level", emoji="🎫", style=discord.ButtonStyle.secondary)
-    async def pass_grant(self, i, _): await i.response.send_modal(PassGrantModal(self.bot))
+    async def pass_grant(self, interaction: discord.Interaction, _):
+        await interaction.response.edit_message(
+            embed=_give_embed("🎫 Grant Dragonpass Level", discord.Color.purple()),
+            view=GrantPassView(self.bot))
 
     @discord.ui.button(label="Giveaway", emoji="🎁", style=discord.ButtonStyle.secondary)
-    async def giveaway(self, i, _):
-        await i.response.defer(ephemeral=True)
-        await _run(i, self.bot, 'giveaway', [])
+    async def giveaway(self, interaction: discord.Interaction, _):
+        await interaction.response.defer(ephemeral=True)
+        await _run(interaction, self.bot, 'giveaway', [])
 
     @discord.ui.button(label="← Back", style=discord.ButtonStyle.gray, row=2)
-    async def back(self, i, _):
-        await i.response.edit_message(embed=_main_embed(), view=DevPanelView(self.bot))
+    async def back(self, interaction: discord.Interaction, _):
+        await interaction.response.edit_message(embed=_main_embed(), view=DevPanelView(self.bot))
 
 
 class ResetView(discord.ui.View):
