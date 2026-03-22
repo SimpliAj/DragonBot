@@ -11,6 +11,7 @@ load_dotenv()
 
 DEV_USER_ID = int(os.getenv('DEV_USER_ID', '774679828594163802'))
 ERROR_WEBHOOK_URL = os.getenv('ERROR_WEBHOOK_URL', "")
+DRAGONPASS_QUEST_REWARDS = os.getenv('DRAGONPASS_QUEST_REWARDS', 'true').lower() == 'true'
 
 # ==================== GLOBAL CONSTANTS ====================
 DB_PATH = 'dragon_bot.db'

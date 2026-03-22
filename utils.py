@@ -14,7 +14,7 @@ import logging
 from config import (
     DB_PATH, DB_TIMEOUT_SHORT, DB_TIMEOUT_LONG,
     DRAGON_TYPES, DRAGON_RARITY_TIERS, BREEDING_LEVEL_THRESHOLDS, BREEDING_XP_COSTS,
-    PERKS_POOL, ENABLE_TOPGG_VOTE_QUEST,
+    PERKS_POOL, ENABLE_TOPGG_VOTE_QUEST, DRAGONPASS_QUEST_REWARDS,
 )
 from state import (
     spawn_channels, active_spawns, active_dragonscales, active_luckycharms,
@@ -467,7 +467,7 @@ def check_dragonpass_quests(guild_id: int, user_id: int, action_type: str, amoun
                 quest['progress'] = current_progress
                 updated_quests.append(quest)
 
-            if coins_gained > 0:
+            if coins_gained > 0 and DRAGONPASS_QUEST_REWARDS:
                 c.execute('UPDATE users SET balance = balance + ? WHERE guild_id = ? AND user_id = ?',
                           (coins_gained, guild_id, user_id))
 

@@ -4,7 +4,7 @@ import time
 import logging
 import discord
 
-from config import ACHIEVEMENTS, DRAGON_RARITY_TIERS, EARNED_TROPHIES, TROPHY_EMOJIS
+from config import ACHIEVEMENTS, DRAGON_RARITY_TIERS, EARNED_TROPHIES, TROPHY_EMOJIS, DRAGONPASS_QUEST_REWARDS
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +121,8 @@ async def send_quest_notification(bot: discord.Client, guild_id: int, user_id: i
 
         desc_lines = [f'{display_name} completed {len(newly)} Dragonpass quest{"s" if len(newly) > 1 else ""}!\n']
         for q in newly:
-            desc_lines.append(f'✅ {_quest_label(q)} (+{q.get("reward", 0):,} 🪙)')
+            reward_str = f' (+{q.get("reward", 0):,} 🪙)' if DRAGONPASS_QUEST_REWARDS else ''
+            desc_lines.append(f'✅ {_quest_label(q)}{reward_str}')
 
         if remaining:
             desc_lines.append('\n📋 **Remaining Quests:**')
