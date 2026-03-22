@@ -16,6 +16,7 @@ import discord
 from discord.ext import commands
 
 from database import get_db_connection, update_balance
+from achievements import check_and_award_achievements
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +218,7 @@ class TopggCog(commands.Cog):
             _give_pack(member.guild.id, user_id, VOTE_WEEKEND_BONUS_PACK)
 
         await self._notify(member, reward, day_in_cycle, streak, total, is_weekend, is_test)
+        await check_and_award_achievements(member.guild.id, user_id, bot=self.bot)
 
     async def _notify(self, user: discord.Member, reward: dict, day_in_cycle: int,
                       streak: int, total: int, is_weekend: bool, is_test: bool):

@@ -17,6 +17,7 @@ from state import *
 import database
 from database import is_player_softlocked, update_balance, get_user
 from utils import *
+from achievements import check_and_award_achievements
 
 
 class DragonNestCog(commands.Cog):
@@ -399,6 +400,8 @@ class DragonNestCog(commands.Cog):
 
                         conn.commit()
                         conn.close()
+
+                        await check_and_award_achievements(self.guild_id, self.user_id, bot=btn_interaction.client)
 
                         perk_store_level = current_level + 1 if current_level < 10 else 10
                         new_selected_perks = generate_unique_perks(perk_store_level, 3, 0)
@@ -1695,6 +1698,8 @@ class DragonNestCog(commands.Cog):
 
                         conn_upgrade.commit()
                         conn_upgrade.close()
+
+                        await check_and_award_achievements(self.guild_id, self.user_id, bot=btn_interaction.client)
 
                         upgrade_name = DRAGONNEST_UPGRADES.get(self.next_level, {}).get('name', 'Unknown')
                         new_rarities = DRAGONNEST_UPGRADES.get(self.next_level, {}).get('allowed_rarities', [])

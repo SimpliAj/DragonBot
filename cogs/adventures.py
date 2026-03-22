@@ -14,10 +14,13 @@ class AdventuresCog(commands.Cog):
 
     async def adventure_type_autocomplete(self, interaction: discord.Interaction, current: str):
         all_types = [
-            app_commands.Choice(name="Exploration (1h cooldown, 90% success)",      value="exploration"),
-            app_commands.Choice(name="Treasure Hunt (2h cooldown, 80% success)",    value="treasure_hunt"),
-            app_commands.Choice(name="Dragon Raid (3h cooldown, 70% success)",      value="dragon_raid"),
-            app_commands.Choice(name="Legendary Quest (6h cooldown, 60% success)",  value="legendary_quest"),
+            app_commands.Choice(name="Exploration (1h cooldown)",      value="exploration"),
+            app_commands.Choice(name="Treasure Hunt (2h cooldown)",    value="treasure_hunt"),
+            app_commands.Choice(name="Dragon Raid (3h cooldown)",      value="dragon_raid"),
+            app_commands.Choice(name="Legendary Quest (6h cooldown)",  value="legendary_quest"),
+            app_commands.Choice(name="Mythical Expedition (12h cooldown)",  value="mythical_expedition"),
+            app_commands.Choice(name="Ancient Awakening (24h cooldown)",    value="ancient_awakening"),
+            app_commands.Choice(name="Dark Abyss (48h cooldown)",            value="dark_abyss"),
         ]
         try:
             conn = sqlite3.connect('dragon_bot.db', timeout=10.0)
@@ -85,25 +88,7 @@ class AdventuresCog(commands.Cog):
             conn.close()
             return
 
-        current_time = int(time.time())
-        duration = adventure_config['duration']
-        returns_at = current_time + duration
-        dragons_json = json.dumps([])
-
-        c.execute('''SELECT MAX(user_adventure_number) FROM user_adventures
-                     WHERE guild_id = ? AND user_id = ?''',
-                  (interaction.guild_id, interaction.user.id))
-        max_num = c.fetchone()[0]
-        user_adventure_number = (max_num or 0) + 1
-
-        c.execute('''INSERT INTO user_adventures
-                     (guild_id, user_id, user_adventure_number, dragons_sent, adventure_type, difficulty, started_at, returns_at, status)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')''',
-                  (interaction.guild_id, interaction.user.id, user_adventure_number, dragons_json, adventure_type, 'normal', current_time, returns_at))
-
-        adventure_id = c.lastrowid
-
-        # Check for consumable items
+        # Check for consumable items FIRST
         c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
                   (interaction.guild_id, interaction.user.id, 'fast_travel_scroll'))
         fts_row = c.fetchone()
@@ -114,8 +99,12 @@ class AdventuresCog(commands.Cog):
         dlb_row = c.fetchone()
         has_double_loot = dlb_row and dlb_row[0] > 0
 
-        conn.commit()
         conn.close()
+
+        # Store data for later use
+        guild_id = interaction.guild_id
+        user_id = interaction.user.id
+        duration = adventure_config['duration']
 
         duration_hours = duration // 3600
         duration_mins = (duration % 3600) // 60
@@ -127,128 +116,228 @@ class AdventuresCog(commands.Cog):
 
         success_rate = int(adventure_config['success_rate'] * 100)
 
-        embed = discord.Embed(
-            title=f"{adventure_config['emoji']} Adventure Started!",
-            description=f"**Type:** {adventure_type.replace('_', ' ').title()}\n"
-                       f"**Cooldown:** {duration_str}\n"
-                       f"**Success Rate:** {success_rate}%\n\n"
-                       f"Your adventure is underway!",
-            color=discord.Color.purple()
-        )
-
-        embed.add_field(
-            name="Potential Rewards (on success)",
-            value=f"💰 {adventure_config['rewards']['coins'][0]:,} - {adventure_config['rewards']['coins'][1]:,} coins\n"
-                 f"🐉 {int(adventure_config['rewards']['dragon_chance'] * 100)}% chance to find a dragon\n"
-                 f"📦 {int(adventure_config['rewards']['item_chance'] * 100)}% chance to find an item",
-            inline=False
-        )
-
-        return_timestamp = int(time.time()) + duration
-        return_datetime = datetime.fromtimestamp(return_timestamp)
-        embed.add_field(
-            name="⏰ Returns at",
-            value=discord.utils.format_dt(return_datetime, style='t'),
-            inline=False
-        )
-
-        # Show item-use buttons if user has relevant consumables
+        # If user has items, show selection BEFORE starting adventure
         if has_fast_travel or has_double_loot:
-            guild_id = interaction.guild_id
-            user_id = interaction.user.id
+            embed = discord.Embed(
+                title=f"{adventure_config['emoji']} Ready to Adventure?",
+                description=f"**Type:** {adventure_type.replace('_', ' ').title()}\n"
+                           f"**Cooldown:** {duration_str}",
+                color=discord.Color.purple()
+            )
 
-            class AdventureItemsView(discord.ui.View):
+            embed.add_field(
+                name="Potential Rewards (on success)",
+                value=f"💰 {adventure_config['rewards']['coins'][0]:,} - {adventure_config['rewards']['coins'][1]:,} coins\n"
+                     f"🐉 {int(adventure_config['rewards']['dragon_chance'] * 100)}% chance to find a dragon\n"
+                     f"📦 {int(adventure_config['rewards']['item_chance'] * 100)}% chance to find an item",
+                inline=False
+            )
+
+            if has_fast_travel:
+                embed.add_field(
+                    name="📜 Fast Travel Scroll",
+                    value="Halve the adventure duration",
+                    inline=True
+                )
+
+            if has_double_loot:
+                embed.add_field(
+                    name="🎒 Double Loot Bag",
+                    value="Double item rewards from adventure",
+                    inline=True
+                )
+
+            # Create item selection view
+            class ItemSelectionView(discord.ui.View):
                 def __init__(self_view):
-                    super().__init__(timeout=60)
+                    super().__init__(timeout=120)
+                    self.use_fast_travel_flag = False
+                    self.use_double_loot_flag = False
+
+                    # Add buttons dynamically based on what items user has
                     if has_fast_travel:
-                        btn = discord.ui.Button(
-                            label="Use Fast Travel Scroll (halve time)",
-                            style=discord.ButtonStyle.primary,
-                            emoji="📜"
-                        )
-                        btn.callback = self_view.use_fast_travel
-                        self_view.add_item(btn)
+                        btn_fast = discord.ui.Button(label="📜 Use Fast Travel", style=discord.ButtonStyle.primary)
+                        btn_fast.callback = self_view.use_fast
+                        self_view.add_item(btn_fast)
+
                     if has_double_loot:
-                        btn2 = discord.ui.Button(
-                            label="Use Double Loot Bag (2x items)",
-                            style=discord.ButtonStyle.success,
-                            emoji="🎒"
+                        btn_double = discord.ui.Button(label="🎒 Use Double Loot", style=discord.ButtonStyle.success)
+                        btn_double.callback = self_view.use_double
+                        self_view.add_item(btn_double)
+
+                    if has_fast_travel and has_double_loot:
+                        btn_both = discord.ui.Button(label="📜🎒 Use Both", style=discord.ButtonStyle.blurple)
+                        btn_both.callback = self_view.use_both
+                        self_view.add_item(btn_both)
+
+                    # Start button always available
+                    btn_start = discord.ui.Button(label="▶️ Start without items", style=discord.ButtonStyle.secondary)
+                    btn_start.callback = self_view.start_normal
+                    self_view.add_item(btn_start)
+
+                async def start_normal(self_view, btn_interaction: discord.Interaction):
+                    if btn_interaction.user.id != user_id:
+                        await btn_interaction.response.send_message("❌ This is not your adventure!", ephemeral=True)
+                        return
+                    await self_view.start_adventure(btn_interaction, False, False)
+
+                async def use_fast(self_view, btn_interaction: discord.Interaction):
+                    if btn_interaction.user.id != user_id:
+                        await btn_interaction.response.send_message("❌ This is not your adventure!", ephemeral=True)
+                        return
+                    await self_view.start_adventure(btn_interaction, True, False)
+
+                async def use_double(self_view, btn_interaction: discord.Interaction):
+                    if btn_interaction.user.id != user_id:
+                        await btn_interaction.response.send_message("❌ This is not your adventure!", ephemeral=True)
+                        return
+                    await self_view.start_adventure(btn_interaction, False, True)
+
+                async def use_both(self_view, btn_interaction: discord.Interaction):
+                    if btn_interaction.user.id != user_id:
+                        await btn_interaction.response.send_message("❌ This is not your adventure!", ephemeral=True)
+                        return
+                    await self_view.start_adventure(btn_interaction, True, True)
+
+                async def start_adventure(self_view, btn_interaction: discord.Interaction, use_fast: bool, use_double: bool):
+                    """Actually create the adventure in database"""
+                    await btn_interaction.response.defer()
+                    
+                    conn2 = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                    c2 = conn2.cursor()
+
+                    current_time = int(time.time())
+                    returns_at = current_time + duration
+                    dragons_json = json.dumps([])
+
+                    c2.execute('''SELECT MAX(user_adventure_number) FROM user_adventures
+                                 WHERE guild_id = ? AND user_id = ?''',
+                              (guild_id, user_id))
+                    max_num = c2.fetchone()[0]
+                    user_adventure_number = (max_num or 0) + 1
+
+                    # Adjust duration if using Fast Travel
+                    if use_fast:
+                        returns_at = current_time + (duration // 2)
+
+                    c2.execute('''INSERT INTO user_adventures
+                                 (guild_id, user_id, user_adventure_number, dragons_sent, adventure_type, difficulty, started_at, returns_at, status, double_loot)
+                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)''',
+                              (guild_id, user_id, user_adventure_number, dragons_json, adventure_type, 'normal', current_time, returns_at, 1 if use_double else 0))
+
+                    # Consume items if used
+                    if use_fast:
+                        c2.execute('UPDATE user_items SET count = count - 1 WHERE guild_id = ? AND user_id = ? AND item_type = ?',
+                                  (guild_id, user_id, 'fast_travel_scroll'))
+                    if use_double:
+                        c2.execute('UPDATE user_items SET count = count - 1 WHERE guild_id = ? AND user_id = ? AND item_type = ?',
+                                  (guild_id, user_id, 'double_loot_bag'))
+
+                    conn2.commit()
+                    conn2.close()
+
+                    # Show result embed
+                    actual_duration = (duration // 2) if use_fast else duration
+                    actual_duration_h = actual_duration // 3600
+                    actual_duration_m = (actual_duration % 3600) // 60
+                    actual_duration_str = f"{actual_duration_h}h {actual_duration_m}m" if actual_duration_h > 0 else f"{actual_duration_m}m"
+
+                    items_used = []
+                    if use_fast:
+                        items_used.append("📜 Fast Travel Scroll")
+                    if use_double:
+                        items_used.append("🎒 Double Loot Bag")
+
+                    result_embed = discord.Embed(
+                        title=f"{adventure_config['emoji']} Adventure Started!",
+                        description=f"**Type:** {adventure_type.replace('_', ' ').title()}\n"
+                                   f"**Duration:** {actual_duration_str}\n"
+                                   f"**Success Rate:** {success_rate}%",
+                        color=discord.Color.purple()
+                    )
+
+                    if items_used:
+                        result_embed.add_field(
+                            name="Items Used",
+                            value="\n".join(items_used),
+                            inline=False
                         )
-                        btn2.callback = self_view.use_double_loot
-                        self_view.add_item(btn2)
 
-                async def use_fast_travel(self_view, btn_interaction: discord.Interaction):
-                    if btn_interaction.user.id != user_id:
-                        await btn_interaction.response.send_message("❌ This is not your adventure!", ephemeral=False)
-                        return
-                    conn2 = sqlite3.connect('dragon_bot.db', timeout=60.0)
-                    c2 = conn2.cursor()
-                    c2.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
-                               (guild_id, user_id, 'fast_travel_scroll'))
-                    row = c2.fetchone()
-                    if not row or row[0] <= 0:
-                        await btn_interaction.response.send_message("❌ No Fast Travel Scrolls left!", ephemeral=False)
-                        conn2.close()
-                        return
-                    new_returns_at = current_time + duration // 2
-                    c2.execute('UPDATE user_adventures SET returns_at = ? WHERE adventure_id = ?',
-                               (new_returns_at, adventure_id))
-                    c2.execute('UPDATE user_items SET count = count - 1 WHERE guild_id = ? AND user_id = ? AND item_type = ?',
-                               (guild_id, user_id, 'fast_travel_scroll'))
-                    conn2.commit()
-                    conn2.close()
-
-                    halved_secs = duration // 2
-                    halved_h = halved_secs // 3600
-                    halved_m = (halved_secs % 3600) // 60
-                    halved_str = f"{halved_h}h {halved_m}m" if halved_h > 0 else f"{halved_m}m"
-
-                    await btn_interaction.response.send_message(
-                        f"📜 **Fast Travel Scroll used!** Adventure duration halved to **{halved_str}**.",
-                        ephemeral=False
+                    result_embed.add_field(
+                        name="Potential Rewards (on success)",
+                        value=f"💰 {adventure_config['rewards']['coins'][0]:,} - {adventure_config['rewards']['coins'][1]:,} coins\n"
+                             f"🐉 {int(adventure_config['rewards']['dragon_chance'] * 100)}% chance to find a dragon\n"
+                             f"📦 {int(adventure_config['rewards']['item_chance'] * 100)}% chance to find an item" + 
+                             (f" **(x2 with Double Loot)**" if use_double else ""),
+                        inline=False
                     )
-                    for child in self_view.children:
-                        if hasattr(child, 'emoji') and child.emoji and str(child.emoji) == "📜":
-                            child.disabled = True
+
+                    return_timestamp = current_time + actual_duration
+                    return_datetime = datetime.fromtimestamp(return_timestamp)
+                    result_embed.add_field(
+                        name="⏰ Returns at",
+                        value=discord.utils.format_dt(return_datetime, style='t'),
+                        inline=False
+                    )
+
+                    await btn_interaction.followup.send(embed=result_embed, ephemeral=False)
+
+                    # Disable all buttons
+                    for item in self_view.children:
+                        item.disabled = True
                     try:
                         await btn_interaction.message.edit(view=self_view)
                     except Exception:
                         pass
 
-                async def use_double_loot(self_view, btn_interaction: discord.Interaction):
-                    if btn_interaction.user.id != user_id:
-                        await btn_interaction.response.send_message("❌ This is not your adventure!", ephemeral=False)
-                        return
-                    conn2 = sqlite3.connect('dragon_bot.db', timeout=60.0)
-                    c2 = conn2.cursor()
-                    c2.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
-                               (guild_id, user_id, 'double_loot_bag'))
-                    row = c2.fetchone()
-                    if not row or row[0] <= 0:
-                        await btn_interaction.response.send_message("❌ No Double Loot Bags left!", ephemeral=False)
-                        conn2.close()
-                        return
-                    c2.execute('UPDATE user_adventures SET double_loot = 1 WHERE adventure_id = ?', (adventure_id,))
-                    c2.execute('UPDATE user_items SET count = count - 1 WHERE guild_id = ? AND user_id = ? AND item_type = ?',
-                               (guild_id, user_id, 'double_loot_bag'))
-                    conn2.commit()
-                    conn2.close()
-
-                    await btn_interaction.response.send_message(
-                        "🎒 **Double Loot Bag activated!** Item drops from this adventure are doubled.",
-                        ephemeral=False
-                    )
-                    for child in self_view.children:
-                        if hasattr(child, 'emoji') and child.emoji and str(child.emoji) == "🎒":
-                            child.disabled = True
-                    try:
-                        await btn_interaction.message.edit(view=self_view)
-                    except Exception:
-                        pass
-
-            embed.set_footer(text="You have items to use! Buttons expire in 60s.")
-            await interaction.followup.send(embed=embed, view=AdventureItemsView(), ephemeral=False)
+            await interaction.followup.send(embed=embed, view=ItemSelectionView(), ephemeral=False)
         else:
+            # No items - just start adventure directly
+            current_time = int(time.time())
+            returns_at = current_time + duration
+            dragons_json = json.dumps([])
+
+            conn2 = sqlite3.connect('dragon_bot.db', timeout=120.0)
+            c2 = conn2.cursor()
+
+            c2.execute('''SELECT MAX(user_adventure_number) FROM user_adventures
+                         WHERE guild_id = ? AND user_id = ?''',
+                      (guild_id, user_id))
+            max_num = c2.fetchone()[0]
+            user_adventure_number = (max_num or 0) + 1
+
+            c2.execute('''INSERT INTO user_adventures
+                         (guild_id, user_id, user_adventure_number, dragons_sent, adventure_type, difficulty, started_at, returns_at, status)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')''',
+                      (guild_id, user_id, user_adventure_number, dragons_json, adventure_type, 'normal', current_time, returns_at))
+
+            conn2.commit()
+            conn2.close()
+
+            embed = discord.Embed(
+                title=f"{adventure_config['emoji']} Adventure Started!",
+                description=f"**Type:** {adventure_type.replace('_', ' ').title()}\n"
+                           f"**Cooldown:** {duration_str}\n\n"
+                           f"Your adventure is underway!",
+                color=discord.Color.purple()
+            )
+
+            embed.add_field(
+                name="Potential Rewards (on success)",
+                value=f"💰 {adventure_config['rewards']['coins'][0]:,} - {adventure_config['rewards']['coins'][1]:,} coins\n"
+                     f"🐉 {int(adventure_config['rewards']['dragon_chance'] * 100)}% chance to find a dragon\n"
+                     f"📦 {int(adventure_config['rewards']['item_chance'] * 100)}% chance to find an item",
+                inline=False
+            )
+
+            return_timestamp = current_time + duration
+            return_datetime = datetime.fromtimestamp(return_timestamp)
+            embed.add_field(
+                name="⏰ Returns at",
+                value=discord.utils.format_dt(return_datetime, style='t'),
+                inline=False
+            )
+
             await interaction.followup.send(embed=embed, ephemeral=False)
 
     @app_commands.command(name="adventures", description="View your active adventures and rewards")

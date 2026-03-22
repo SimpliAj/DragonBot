@@ -702,6 +702,14 @@ def init_db():
         expires_at INTEGER
     )''')
 
+    # Dragonpass completions
+    c.execute('''CREATE TABLE IF NOT EXISTS dragonpass_completions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        completed_at INTEGER NOT NULL
+    )''')
+
     conn.commit()
     conn.close()
 
@@ -867,167 +875,7 @@ def safe_json_loads(json_str: str, default=None):
 
 
 # ==================== ACHIEVEMENTS ====================
-async def check_and_award_achievements(guild_id: int, user_id: int, interaction: discord.Interaction = None):
-    """Check and award achievements to a user, notify if any were unlocked."""
-    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
-    c = conn.cursor()
-
-    # Get user stats for achievement checking
-    c.execute('SELECT balance FROM users WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
-    balance_result = c.fetchone()
-    balance = balance_result[0] if balance_result else 0
-
-    # Total dragons caught
-    c.execute('SELECT SUM(count) FROM user_dragons WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
-    total_caught_result = c.fetchone()
-    total_caught = total_caught_result[0] if total_caught_result and total_caught_result[0] else 0
-
-    # Unique types collected
-    c.execute('SELECT COUNT(*) FROM user_dragons WHERE guild_id = ? AND user_id = ? AND count > 0', (guild_id, user_id))
-    unique_types = c.fetchone()[0]
-
-    # Check rarity catches (first of each)
-    uncommon_caught = 0
-    rare_caught = 0
-    epic_caught = 0
-    legendary_caught = 0
-    mythic_caught = 0
-    ultra_caught = 0
-
-    for rarity_tier, dragons in DRAGON_RARITY_TIERS.items():
-        for dragon_type in dragons:
-            c.execute('SELECT count FROM user_dragons WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
-                      (guild_id, user_id, dragon_type))
-            result = c.fetchone()
-            if result and result[0] > 0:
-                if rarity_tier == 'uncommon':
-                    uncommon_caught = 1
-                elif rarity_tier == 'rare':
-                    rare_caught = 1
-                elif rarity_tier == 'epic':
-                    epic_caught = 1
-                elif rarity_tier == 'legendary':
-                    legendary_caught = 1
-                elif rarity_tier == 'mythic':
-                    mythic_caught = 1
-                elif rarity_tier == 'ultra':
-                    ultra_caught = 1
-                break
-
-    # Trades completed
-    c.execute('''SELECT COUNT(*) FROM trade_offers
-                 WHERE guild_id = ? AND (sender_id = ? OR receiver_id = ?) AND status = 'completed' ''',
-              (guild_id, user_id, user_id))
-    trades_completed = c.fetchone()[0]
-
-    # Breeds completed
-    c.execute('SELECT COUNT(*) FROM bred_dragons WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
-    breeds_completed = c.fetchone()[0]
-
-    # Alpha dragons crafted
-    c.execute('SELECT COUNT(*) FROM user_alphas WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
-    alphas_crafted = c.fetchone()[0]
-
-    # Dragon Nest level
-    c.execute('SELECT level FROM dragon_nest WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
-    nest_result = c.fetchone()
-    nest_level = nest_result[0] if nest_result else 0
-
-    achievement_progress = {
-        'catch_1': total_caught,
-        'catch_10': total_caught,
-        'catch_50': total_caught,
-        'catch_100': total_caught,
-        'catch_250': total_caught,
-        'catch_500': total_caught,
-        'catch_1000': total_caught,
-        'first_uncommon': uncommon_caught,
-        'first_rare': rare_caught,
-        'first_epic': epic_caught,
-        'first_legendary': legendary_caught,
-        'first_mythic': mythic_caught,
-        'first_ultra': ultra_caught,
-        'collector_5': unique_types,
-        'collector_10': unique_types,
-        'collector_15': unique_types,
-        'collector_all': unique_types,
-        'rich_1k': balance,
-        'rich_10k': balance,
-        'rich_100k': balance,
-        'rich_1m': balance,
-        'rich_10m': balance,
-        'rich_100m': balance,
-        'rich_500m': balance,
-        'breeder_1': breeds_completed,
-        'breeder_5': breeds_completed,
-        'breeder_10': breeds_completed,
-        'alpha_1': alphas_crafted,
-        'alpha_5': alphas_crafted,
-        'trader_1': trades_completed,
-        'trader_5': trades_completed,
-        'trader_10': trades_completed,
-        'nest_level_5': nest_level,
-        'nest_level_10': nest_level,
-        'daily_7': 0,
-        'daily_14': 0,
-        'daily_30': 0,
-        'daily_100': 0,
-    }
-
-    newly_unlocked = []
-    total_coins_awarded = 0
-
-    for ach_id, ach_data in ACHIEVEMENTS.items():
-        progress = achievement_progress.get(ach_id, 0)
-        requirement = ach_data['requirement']
-
-        c.execute('SELECT unlocked FROM user_achievements WHERE guild_id = ? AND user_id = ? AND achievement_id = ?',
-                  (guild_id, user_id, ach_id))
-        unlocked_result = c.fetchone()
-        is_unlocked = unlocked_result[0] if unlocked_result else False
-
-        if progress >= requirement and not is_unlocked:
-            c.execute('''INSERT OR REPLACE INTO user_achievements
-                         (guild_id, user_id, achievement_id, progress, unlocked, unlocked_at)
-                         VALUES (?, ?, ?, ?, 1, ?)''',
-                      (guild_id, user_id, ach_id, progress, int(time.time())))
-            c.execute('UPDATE users SET balance = balance + ? WHERE guild_id = ? AND user_id = ?',
-                      (ach_data['reward_coins'], guild_id, user_id))
-            newly_unlocked.append({
-                'id': ach_id,
-                'name': ach_data['name'],
-                'description': ach_data['description'],
-                'icon': ach_data['icon'],
-                'reward': ach_data['reward_coins'],
-                'category': ach_data.get('category', 'Other')
-            })
-            total_coins_awarded += ach_data['reward_coins']
-        else:
-            c.execute('''INSERT OR REPLACE INTO user_achievements
-                         (guild_id, user_id, achievement_id, progress, unlocked)
-                         VALUES (?, ?, ?, ?, ?)''',
-                      (guild_id, user_id, ach_id, progress, 1 if is_unlocked else 0))
-
-    conn.commit()
-    conn.close()
-
-    if newly_unlocked and interaction:
-        try:
-            embed = discord.Embed(
-                title="🎉 Achievement(s) Unlocked!",
-                description=f"You've earned {len(newly_unlocked)} new achievement(s)!",
-                color=discord.Color.gold()
-            )
-            for ach in newly_unlocked:
-                embed.add_field(
-                    name=f"{ach['icon']} {ach['name']}",
-                    value=f"_{ach['description']}_\n+**{ach['reward']}** 🪙",
-                    inline=False
-                )
-            embed.set_footer(text=f"Total earned: +{total_coins_awarded} 🪙")
-            await interaction.followup.send(embed=embed, ephemeral=False)
-        except Exception as e:
-            logger.error(f"Error sending achievement notification: {e}")
+from achievements import check_and_award_achievements  # noqa: F401 — re-exported for importers
 
 
 # ==================== ITEM COST CALCULATION ====================

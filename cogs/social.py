@@ -10,7 +10,8 @@ from config import (
     LEVEL_NAMES, DRAGON_TYPES, DRAGON_RARITY_TIERS, ACHIEVEMENTS
 )
 from utils import format_time_remaining, safe_json_loads
-from database import check_and_award_achievements, update_balance
+from achievements import check_and_award_achievements
+from database import update_balance
 from utils import check_dragonpass_quests
 
 logger = logging.getLogger(__name__)
@@ -325,7 +326,7 @@ class SocialCog(commands.Cog):
         user_id = target_user.id
 
         if interaction.user.id == user_id:
-            await check_and_award_achievements(guild_id, user_id, interaction)
+            await check_and_award_achievements(guild_id, user_id, bot=self.bot, interaction=interaction)
 
         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
         c = conn.cursor()

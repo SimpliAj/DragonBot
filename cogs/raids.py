@@ -17,6 +17,7 @@ from state import *
 import database
 from database import is_player_softlocked, update_balance
 from utils import *
+from achievements import check_and_award_achievements
 
 logger = logging.getLogger(__name__)
 
@@ -369,6 +370,8 @@ class RaidAttackView(discord.ui.View):
         user_total_damage = total_damage_result[0] if total_damage_result else damage
 
         conn_a.commit()
+
+        await check_and_award_achievements(btn_interaction.guild_id, btn_interaction.user.id, bot=self.bot)
 
         # Get updated boss data for embed update
         c_a.execute('SELECT easy_hp, easy_max_hp, normal_hp, normal_max_hp, hard_hp, hard_max_hp, boss_name, boss_rarity, reward_dragon, expires_at, message_id FROM raid_bosses WHERE guild_id = ?',
@@ -882,6 +885,8 @@ class RaidBossStatusView(discord.ui.View):
         user_total_damage = total_damage_result[0] if total_damage_result else damage
 
         conn_a.commit()
+
+        await check_and_award_achievements(btn_interaction.guild_id, btn_interaction.user.id, bot=self.bot)
 
         await asyncio.to_thread(check_dragonpass_quests, btn_interaction.guild_id, btn_interaction.user.id, 'attack_raidboss', 1)
 

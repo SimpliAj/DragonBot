@@ -1668,13 +1668,14 @@ class DragonsCog(commands.Cog):
                   (guild_id, user_id))
         unique_dragons = c.fetchone()[0] or 0
 
-        # Get Dragon Nest level
-        c.execute('SELECT level, xp, bounties_completed FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
+        # Get Dragon Nest level + upgrade tier
+        c.execute('SELECT level, xp, bounties_completed, upgrade_level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
                   (guild_id, user_id))
         nest_result = c.fetchone()
         nest_level = nest_result[0] if nest_result else 0
         nest_xp = nest_result[1] if nest_result else 0
         bounties_completed = nest_result[2] if nest_result else 0
+        nest_upgrade = nest_result[3] if nest_result else 0
 
         # Get Dragonpass level and XP
         c.execute('SELECT level, xp FROM dragonpass WHERE guild_id = ? AND user_id = ? AND season = 1',
@@ -1698,7 +1699,6 @@ class DragonsCog(commands.Cog):
 
         rarest_dragon = None
         if all_user_dragons:
-            # Find rarest by spawn chance
             rarest_dragon = min(all_user_dragons, key=lambda x: DRAGON_TYPES[x[0]]['spawn_chance'])[0]
 
         # Get Server Trophy count
@@ -1718,80 +1718,180 @@ class DragonsCog(commands.Cog):
                      ORDER BY slowest_catch DESC LIMIT 1''', (guild_id, user_id))
         slowest_result = c.fetchone()
 
+        # Adventures completed
+        c.execute('''SELECT COUNT(*) FROM user_adventures
+                     WHERE guild_id = ? AND user_id = ? AND claimed = 1''',
+                  (guild_id, user_id))
+        adventures_done = c.fetchone()[0] or 0
+
+        # Raid damage dealt (all-time)
+        c.execute('SELECT SUM(damage_dealt), SUM(attacks_made) FROM raid_damage WHERE guild_id = ? AND user_id = ?',
+                  (guild_id, user_id))
+        raid_row = c.fetchone()
+        raid_damage_total = raid_row[0] or 0
+        raid_attacks_total = raid_row[1] or 0
+
+        # Breeding stats
+        c.execute('SELECT COUNT(*) FROM bred_dragons WHERE guild_id = ? AND user_id = ?',
+                  (guild_id, user_id))
+        dragons_bred = c.fetchone()[0] or 0
+
+        c.execute('SELECT level FROM breeding_xp WHERE guild_id = ? AND user_id = ?',
+                  (guild_id, user_id))
+        breed_xp_row = c.fetchone()
+        breeding_level = breed_xp_row[0] if breed_xp_row else 1
+
+        # Achievements unlocked
+        c.execute('SELECT COUNT(*) FROM user_achievements WHERE guild_id = ? AND user_id = ?',
+                  (guild_id, user_id))
+        achievements_count = c.fetchone()[0] or 0
+
+        # Vote streak
+        c.execute('SELECT current_streak, total_votes, best_streak FROM vote_streaks WHERE user_id = ?',
+                  (user_id,))
+        vote_row = c.fetchone()
+        vote_streak = vote_row[0] if vote_row else 0
+        total_votes = vote_row[1] if vote_row else 0
+        best_streak = vote_row[2] if vote_row else 0
+
         conn.close()
 
-        embed = discord.Embed(
-            title=f"📊 {user.display_name}'s Profile",
-            color=0x5865F2
-        )
-        embed.set_thumbnail(url=user.display_avatar.url)
-
-        # General Stats
-        embed.add_field(
-            name="💰 Economy",
-            value=f"Balance: **{balance:,.2f}** coins\nTotal Dragons: **{total_dragons:,}**\nUnique Types: **{unique_dragons}/{len(DRAGON_TYPES)}**",
-            inline=True
-        )
-
-        # Dragon Nest Stats
-        level_name = LEVEL_NAMES.get(nest_level, "Hatchling")
-        embed.add_field(
-            name="🏆 Dragon Nest",
-            value=f"Level: **{nest_level}** ({level_name})\nBounties: **{bounties_completed}**",
-            inline=True
-        )
-
-        # Dragonpass Stats
-        embed.add_field(
-            name="🎁 Dragonpass",
-            value=f"Level: **{pass_level}**/30\nSeason: **1**",
-            inline=True
-        )
-
-        # Alpha Dragons
-        embed.add_field(
-            name="✨ Alpha Dragons",
-            value=f"Count: **{alpha_count}**\nCatch Boost: **+{total_catch_boost*100:.1f}%**",
-            inline=True
-        )
-
-        # Server Trophy (cosmetic)
-        if trophy_count > 0:
-            embed.add_field(
-                name="🥇 Server Trophies",
-                value="🥇 " * min(trophy_count, 10) + (f"\n*(+{trophy_count - 10} more)*" if trophy_count > 10 else ""),
-                inline=True
+        # --- Build the 3 pages ---
+        def build_page1():
+            level_name = LEVEL_NAMES.get(nest_level, "Hatchling")
+            e = discord.Embed(
+                title=f"📊 {user.display_name}'s Profile",
+                color=0x5865F2,
             )
-
-        # Rarest Dragon
-        if rarest_dragon:
-            rarest_data = DRAGON_TYPES[rarest_dragon]
-            embed.add_field(
-                name="🌟 Rarest Dragon Owned",
-                value=f"{rarest_data['emoji']} **{rarest_data['name']}**\n(Spawn Rate: {rarest_data['spawn_chance']:.2f}%)",
-                inline=False
+            e.set_thumbnail(url=user.display_avatar.url)
+            e.add_field(
+                name="💰 Economy",
+                value=(
+                    f"Balance: **{balance:,.0f}** 🪙\n"
+                    f"Total Dragons: **{total_dragons:,}**\n"
+                    f"Unique Types: **{unique_dragons}/{len(DRAGON_TYPES)}**"
+                ),
+                inline=True,
             )
+            e.add_field(
+                name="🏰 Dragon Nest",
+                value=(
+                    f"Level: **{nest_level}/10** ({level_name})\n"
+                    f"Upgrade Tier: **{nest_upgrade}/5**\n"
+                    f"Bounties: **{bounties_completed}**"
+                ),
+                inline=True,
+            )
+            e.add_field(
+                name="🎁 Dragonpass",
+                value=f"Level: **{pass_level}/30**\nSeason: **1**",
+                inline=True,
+            )
+            e.add_field(
+                name="✨ Alpha Dragons",
+                value=(
+                    f"Created: **{alpha_count}**\n"
+                    f"Catch Boost: **+{total_catch_boost * 100:.1f}%**"
+                ),
+                inline=True,
+            )
+            e.set_footer(text="Page 1/3")
+            return e
 
-        # Catch Times
-        if fastest_result or slowest_result:
-            catch_times_text = ""
-            if fastest_result:
-                fastest_dragon = DRAGON_TYPES[fastest_result[0]]
-                fastest_time = fastest_result[1]
-                catch_times_text += f"⚡ **Fastest:** {fastest_time:.2f}s ({fastest_dragon['emoji']} {fastest_dragon['name']})\n"
-            if slowest_result:
-                slowest_dragon = DRAGON_TYPES[slowest_result[0]]
-                slowest_time = slowest_result[1]
-                catch_times_text += f"🐢 **Slowest:** {slowest_time:.2f}s ({slowest_dragon['emoji']} {slowest_dragon['name']})"
-
-            if catch_times_text:
-                embed.add_field(
-                    name="⏱️ Catch Times",
-                    value=catch_times_text,
-                    inline=False
+        def build_page2():
+            e = discord.Embed(
+                title=f"📊 {user.display_name}'s Activity",
+                color=0x5865F2,
+            )
+            e.set_thumbnail(url=user.display_avatar.url)
+            if raid_damage_total > 0:
+                e.add_field(
+                    name="⚔️ Raids",
+                    value=(
+                        f"Total Damage: **{raid_damage_total:,}**\n"
+                        f"Attacks Made: **{raid_attacks_total:,}**"
+                    ),
+                    inline=True,
                 )
+            if adventures_done > 0:
+                e.add_field(
+                    name="🗺️ Adventures",
+                    value=f"Completed: **{adventures_done}**",
+                    inline=True,
+                )
+            e.add_field(
+                name="🥚 Breeding",
+                value=(
+                    f"Dragons Bred: **{dragons_bred}**\n"
+                    f"Breeding Level: **{breeding_level}**"
+                ),
+                inline=True,
+            )
+            if not e.fields:
+                e.description = "*No activity recorded yet.*"
+            e.set_footer(text="Page 2/3")
+            return e
 
-        await interaction.followup.send(embed=embed, ephemeral=False)
+        def build_page3():
+            e = discord.Embed(
+                title=f"📊 {user.display_name}'s Records",
+                color=0x5865F2,
+            )
+            e.set_thumbnail(url=user.display_avatar.url)
+            if rarest_dragon:
+                rarest_data = DRAGON_TYPES[rarest_dragon]
+                e.add_field(
+                    name="🌟 Rarest Dragon Owned",
+                    value=(
+                        f"{rarest_data['emoji']} **{rarest_data['name']}**\n"
+                        f"(Spawn Rate: {rarest_data['spawn_chance']:.2f}%)"
+                    ),
+                    inline=False,
+                )
+            if fastest_result or slowest_result:
+                parts = []
+                if fastest_result:
+                    fd = DRAGON_TYPES[fastest_result[0]]
+                    parts.append(f"⚡ **Fastest:** {fastest_result[1]:.2f}s ({fd['emoji']} {fd['name']})")
+                if slowest_result:
+                    sd = DRAGON_TYPES[slowest_result[0]]
+                    parts.append(f"🐢 **Slowest:** {slowest_result[1]:.2f}s ({sd['emoji']} {sd['name']})")
+                e.add_field(name="⏱️ Catch Times", value="\n".join(parts), inline=False)
+            e.add_field(
+                name="🏅 Achievements",
+                value=f"Unlocked: **{achievements_count}**",
+                inline=True,
+            )
+            if total_votes > 0:
+                e.add_field(
+                    name="🗳️ Votes",
+                    value=(
+                        f"Total: **{total_votes}**\n"
+                        f"Streak: **{vote_streak}** | Best: **{best_streak}**"
+                    ),
+                    inline=True,
+                )
+            e.set_footer(text="Page 3/3")
+            return e
+
+        pages = [build_page1(), build_page2(), build_page3()]
+
+        class PaginatedStatsView(discord.ui.View):
+            def __init__(self):
+                super().__init__(timeout=180)
+                self.page = 0
+
+            @discord.ui.button(emoji="◀️", style=discord.ButtonStyle.secondary)
+            async def prev_page(self, btn_interaction: discord.Interaction, button: discord.ui.Button):
+                self.page = (self.page - 1) % len(pages)
+                await btn_interaction.response.edit_message(embed=pages[self.page], view=self)
+
+            @discord.ui.button(emoji="▶️", style=discord.ButtonStyle.secondary)
+            async def next_page(self, btn_interaction: discord.Interaction, button: discord.ui.Button):
+                self.page = (self.page + 1) % len(pages)
+                await btn_interaction.response.edit_message(embed=pages[self.page], view=self)
+
+        await interaction.followup.send(embed=pages[0], view=PaginatedStatsView())
 
 
 async def setup(bot: commands.Bot):

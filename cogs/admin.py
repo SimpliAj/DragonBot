@@ -1322,6 +1322,41 @@ async def handle_dev_command(message, command, args):
         await message.channel.send(embed=embed)
         return
 
+    # -db resetadventurecd <@user>
+    if command == 'resetadventurecd':
+        if not message.mentions:
+            await message.channel.send("❌ Usage: `-db resetadventurecd <@user>`")
+            return
+
+        user = message.mentions[0]
+        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        c = conn.cursor()
+
+        c.execute('DELETE FROM adventure_cooldowns WHERE guild_id = ? AND user_id = ?',
+                  (guild_id, user.id))
+
+        affected = c.rowcount
+        conn.commit()
+        conn.close()
+
+        if affected > 0:
+            embed = discord.Embed(
+                title="✅ Adventure Cooldowns Reset",
+                description=f"**User:** {user.mention}\n"
+                            f"**Status:** All adventure cooldowns removed!",
+                color=discord.Color.green()
+            )
+        else:
+            embed = discord.Embed(
+                title="⚠️ No Cooldowns Found",
+                description=f"**User:** {user.mention}\n"
+                            f"**Status:** User has no active adventure cooldowns",
+                color=discord.Color.yellow()
+            )
+
+        await message.channel.send(embed=embed)
+        return
+
     # -db raidinfo
     if command == 'raidinfo':
         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)

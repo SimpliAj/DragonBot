@@ -322,27 +322,45 @@ def normalize_dragon_type(dragon_input: str) -> str:
 ADVENTURE_TYPES = {
     'exploration': {
         'duration': 1 * 3600,  # 1 hour cooldown
-        'success_rate': 0.90,  # 90% success, 10% fail
+        'success_rate': 0.70,  # 70% success, 30% fail
         'rewards': {'coins': (100, 300), 'dragon_chance': 0.15, 'item_chance': 0.08},
         'emoji': '🗺️'
     },
     'treasure_hunt': {
         'duration': 2 * 3600,  # 2 hour cooldown
-        'success_rate': 0.80,  # 80% success, 20% fail
+        'success_rate': 0.65,  # 65% success, 35% fail
         'rewards': {'coins': (400, 800), 'dragon_chance': 0.25, 'item_chance': 0.12},
         'emoji': '💰'
     },
     'dragon_raid': {
         'duration': 3 * 3600,  # 3 hour cooldown
-        'success_rate': 0.70,  # 70% success, 30% fail
+        'success_rate': 0.60,  # 60% success, 40% fail
         'rewards': {'coins': (1000, 2000), 'dragon_chance': 0.35, 'item_chance': 0.15},
         'emoji': '⚔️'
     },
     'legendary_quest': {
         'duration': 6 * 3600,  # 6 hour cooldown
-        'success_rate': 0.60,  # 60% success, 40% fail
+        'success_rate': 0.68,  # 68% success, 32% fail
         'rewards': {'coins': (2000, 4000), 'dragon_chance': 0.50, 'item_chance': 0.20},
         'emoji': '🏆'
+    },
+    'mythical_expedition': {
+        'duration': 12 * 3600,  # 12 hour cooldown
+        'success_rate': 0.75,  # 75% success, 25% fail
+        'rewards': {'coins': (4000, 8000), 'dragon_chance': 0.60, 'item_chance': 0.23},
+        'emoji': '✨'
+    },
+    'ancient_awakening': {
+        'duration': 24 * 3600,  # 24 hour cooldown
+        'success_rate': 0.80,  # 80% success, 20% fail
+        'rewards': {'coins': (8000, 15000), 'dragon_chance': 0.70, 'item_chance': 0.26},
+        'emoji': '👑'
+    },
+    'dark_abyss': {
+        'duration': 48 * 3600,  # 48 hour cooldown
+        'success_rate': 0.85,  # 85% success, 15% fail
+        'rewards': {'coins': (15000, 30000), 'dragon_chance': 0.80, 'item_chance': 0.30},
+        'emoji': '🌑'
     }
 }
 
@@ -445,13 +463,13 @@ MYSTERY_BOX_POOL = [
 
 # Dice of Fate: weighted effect pool
 DICE_OF_FATE_EFFECTS = [
-    {'type': 'coins_gain', 'amount': (1000, 5000),  'weight': 20, 'emoji': '💰', 'label': 'You found a coin stash! +{amount} coins'},
+    {'type': 'coins_gain', 'amount': (2000, 6000),  'weight': 20, 'emoji': '💰', 'label': 'You found a coin stash! +{amount} coins'},
     {'type': 'coins_gain', 'amount': (5000, 20000), 'weight':  8, 'emoji': '🤑', 'label': 'Jackpot! Coins rain from the sky! +{amount} coins'},
     {'type': 'coins_loss', 'amount': (500,  2000),  'weight': 15, 'emoji': '💸', 'label': 'A thieving goblin steals {amount} coins!'},
     {'type': 'luckycharm',                          'weight': 12, 'emoji': '🍀', 'label': 'A Lucky Charm materializes in your hands!'},
     {'type': 'item',       'item_type': 'fast_travel_scroll', 'weight': 10, 'emoji': '📜', 'label': 'A mystical scroll unfurls before you!'},
-    {'type': 'item',       'item_type': 'double_loot_bag',    'weight':  8, 'emoji': '🎒', 'label': 'A mysterious bag drops into your lap!'},
-    {'type': 'dragonscale','minutes':   (3, 10),              'weight': 15, 'emoji': '🟪', 'label': 'Dragon energy surges! +{minutes}min Dragonscale'},
+    {'type': 'item',       'item_type': 'double_loot_bag',    'weight': 12, 'emoji': '🎒', 'label': 'A mysterious bag drops into your lap!'},
+    {'type': 'dragonscale','minutes':   (1, 5),               'weight':  8, 'emoji': '🟪', 'label': 'Dragon energy surges! +{minutes}min Dragonscale'},
     {'type': 'nothing',                             'weight': 12, 'emoji': '💨', 'label': 'Nothing happens... The dice mocks you.'},
 ]
 
@@ -517,6 +535,51 @@ ACHIEVEMENTS = {
     'daily_14': {'name': 'Very Dedicated', 'description': 'Claim daily reward 14 days in a row', 'category': '📅 Dedication', 'requirement': 14, 'reward_coins': 300, 'icon': '📆'},
     'daily_30': {'name': 'Devoted', 'description': 'Claim daily reward 30 days in a row', 'category': '📅 Dedication', 'requirement': 30, 'reward_coins': 1000, 'icon': '🗓️'},
     'daily_100': {'name': 'Loyal Companion', 'description': 'Claim daily reward 100 days in a row', 'category': '📅 Dedication', 'requirement': 100, 'reward_coins': 2000, 'icon': '💝'},
+
+    # ===== RAIDS ACHIEVEMENTS =====
+    'raid_first': {'name': 'Raid Initiate', 'description': 'Deal damage in your first raid', 'category': '⚔️ Raids', 'requirement': 1, 'reward_coins': 100, 'icon': '⚔️'},
+    'raid_damage_10k': {'name': 'Raid Fighter', 'description': 'Deal 10,000 total raid damage', 'category': '⚔️ Raids', 'requirement': 10000, 'reward_coins': 500, 'icon': '🗡️'},
+    'raid_damage_100k': {'name': 'Raid Veteran', 'description': 'Deal 100,000 total raid damage', 'category': '⚔️ Raids', 'requirement': 100000, 'reward_coins': 2000, 'icon': '🛡️'},
+    'raid_damage_1m': {'name': 'Raid Legend', 'description': 'Deal 1,000,000 total raid damage', 'category': '⚔️ Raids', 'requirement': 1000000, 'reward_coins': 10000, 'icon': '💥'},
+    'raid_attacks_10': {'name': 'Attack Spree', 'description': 'Make 10 raid attacks', 'category': '⚔️ Raids', 'requirement': 10, 'reward_coins': 200, 'icon': '🏹'},
+    'raid_attacks_50': {'name': 'Battle Hardened', 'description': 'Make 50 raid attacks', 'category': '⚔️ Raids', 'requirement': 50, 'reward_coins': 1000, 'icon': '⚙️'},
+    'raid_attacks_100': {'name': 'War Machine', 'description': 'Make 100 raid attacks', 'category': '⚔️ Raids', 'requirement': 100, 'reward_coins': 5000, 'icon': '🔱'},
+
+    # ===== ADVENTURES ACHIEVEMENTS =====
+    'adventure_first': {'name': 'Adventure Begins', 'description': 'Complete your first adventure', 'category': '🗺️ Adventures', 'requirement': 1, 'reward_coins': 100, 'icon': '🗺️'},
+    'adventure_10': {'name': 'Explorer', 'description': 'Complete 10 adventures', 'category': '🗺️ Adventures', 'requirement': 10, 'reward_coins': 500, 'icon': '🧭'},
+    'adventure_50': {'name': 'Adventurer', 'description': 'Complete 50 adventures', 'category': '🗺️ Adventures', 'requirement': 50, 'reward_coins': 2000, 'icon': '🌍'},
+    'adventure_100': {'name': 'Legend of the Land', 'description': 'Complete 100 adventures', 'category': '🗺️ Adventures', 'requirement': 100, 'reward_coins': 10000, 'icon': '🏔️'},
+
+    # ===== EXTENDED BREEDING ACHIEVEMENTS =====
+    'breeder_50': {'name': 'Master Breeder', 'description': 'Breed 50 dragons', 'category': '🥚 Breeding', 'requirement': 50, 'reward_coins': 5000, 'icon': '🐲'},
+    'breeding_level_5': {'name': 'Breeding Expert', 'description': 'Reach Breeding Level 5', 'category': '🥚 Breeding', 'requirement': 5, 'reward_coins': 2000, 'icon': '🔬'},
+    'breeding_level_10': {'name': 'Breeding Master', 'description': 'Reach Breeding Level 10', 'category': '🥚 Breeding', 'requirement': 10, 'reward_coins': 10000, 'icon': '🧬'},
+
+    # ===== EXTENDED NEST ACHIEVEMENTS =====
+    'nest_upgrade_1': {'name': 'Nest Upgraded', 'description': 'Upgrade your Dragon Nest once', 'category': '🏰 Dragon Nest', 'requirement': 1, 'reward_coins': 500, 'icon': '🔨'},
+    'nest_upgrade_3': {'name': 'Nest Reinforced', 'description': 'Reach Nest Upgrade Tier 3', 'category': '🏰 Dragon Nest', 'requirement': 3, 'reward_coins': 2000, 'icon': '🏗️'},
+    'nest_upgrade_5': {'name': 'Nest Perfected', 'description': 'Reach Nest Upgrade Tier 5 (Max)', 'category': '🏰 Dragon Nest', 'requirement': 5, 'reward_coins': 10000, 'icon': '🏰'},
+    'nest_bounties_50': {'name': 'Bounty Hunter', 'description': 'Complete 50 nest bounties', 'category': '🏰 Dragon Nest', 'requirement': 50, 'reward_coins': 2000, 'icon': '🎯'},
+    'nest_bounties_100': {'name': 'Elite Bounty Hunter', 'description': 'Complete 100 nest bounties', 'category': '🏰 Dragon Nest', 'requirement': 100, 'reward_coins': 8000, 'icon': '🏹'},
+
+    # ===== DRAGONPASS ACHIEVEMENTS =====
+    'dragonpass_1': {'name': 'Pass Graduate', 'description': 'Complete the Dragonpass once (reach Level 30)', 'category': '🎫 Dragonpass', 'requirement': 1, 'reward_coins': 1000, 'icon': '🎫'},
+    'dragonpass_3': {'name': 'Pass Veteran', 'description': 'Complete the Dragonpass 3 times', 'category': '🎫 Dragonpass', 'requirement': 3, 'reward_coins': 5000, 'icon': '🌟'},
+    'dragonpass_5': {'name': 'Pass Legend', 'description': 'Complete the Dragonpass 5 times', 'category': '🎫 Dragonpass', 'requirement': 5, 'reward_coins': 15000, 'icon': '👑'},
+    'dragonpass_10': {'name': 'Pass Master', 'description': 'Complete the Dragonpass 10 times', 'category': '🎫 Dragonpass', 'requirement': 10, 'reward_coins': 50000, 'icon': '💎'},
+
+    # ===== EXTENDED ALPHA ACHIEVEMENTS =====
+    'alpha_3': {'name': 'Alpha Collector', 'description': 'Craft 3 Alpha Dragons', 'category': '✨ Alpha', 'requirement': 3, 'reward_coins': 2000, 'icon': '💫'},
+    'alpha_10': {'name': 'Alpha Overlord', 'description': 'Craft 10 Alpha Dragons', 'category': '✨ Alpha', 'requirement': 10, 'reward_coins': 20000, 'icon': '🌠'},
+
+    # ===== VOTING ACHIEVEMENTS =====
+    'vote_first': {'name': 'First Vote', 'description': 'Vote for the bot for the first time', 'category': '🗳️ Voting', 'requirement': 1, 'reward_coins': 200, 'icon': '🗳️'},
+    'vote_10': {'name': 'Regular Voter', 'description': 'Vote 10 times total', 'category': '🗳️ Voting', 'requirement': 10, 'reward_coins': 500, 'icon': '📋'},
+    'vote_50': {'name': 'Dedicated Voter', 'description': 'Vote 50 times total', 'category': '🗳️ Voting', 'requirement': 50, 'reward_coins': 2000, 'icon': '📜'},
+    'vote_100': {'name': 'Top Voter', 'description': 'Vote 100 times total', 'category': '🗳️ Voting', 'requirement': 100, 'reward_coins': 10000, 'icon': '🏅'},
+    'vote_streak_7': {'name': 'Weekly Supporter', 'description': 'Maintain a 7-day vote streak', 'category': '🗳️ Voting', 'requirement': 7, 'reward_coins': 1000, 'icon': '🔥'},
+    'vote_streak_30': {'name': 'Monthly Supporter', 'description': 'Maintain a 30-day vote streak', 'category': '🗳️ Voting', 'requirement': 30, 'reward_coins': 5000, 'icon': '💎'},
 }
 
 # ==================== DRAGON NEST UPGRADE SYSTEM ====================

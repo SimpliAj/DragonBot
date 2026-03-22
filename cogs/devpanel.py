@@ -495,6 +495,10 @@ class ResetView(discord.ui.View):
         await i.response.defer(ephemeral=True)
         await _run(i, self.bot, 'resetspawn', [])
 
+    @discord.ui.button(label="Reset Adventure CD", emoji="🗺️", style=discord.ButtonStyle.secondary, row=1)
+    async def reset_adventure_cd(self, i, _):
+        await i.response.send_modal(ResetUserModal(self.bot, 'resetadventurecd', 'Reset Adventure Cooldowns'))
+
     @discord.ui.button(label="← Back", style=discord.ButtonStyle.gray, row=2)
     async def back(self, i, _):
         await i.response.edit_message(embed=_main_embed(), view=DevPanelView(self.bot))
