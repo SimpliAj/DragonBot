@@ -710,6 +710,23 @@ def init_db():
         completed_at INTEGER NOT NULL
     )''')
 
+    c.execute('''CREATE TABLE IF NOT EXISTS user_trophies (
+        guild_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        trophy_id TEXT NOT NULL,
+        earned_at INTEGER NOT NULL,
+        PRIMARY KEY (guild_id, user_id, trophy_id)
+    )''')
+
+    c.execute('''CREATE TABLE IF NOT EXISTS active_dragon_spawns (
+        guild_id INTEGER PRIMARY KEY,
+        dragon_type TEXT NOT NULL,
+        channel_id INTEGER NOT NULL,
+        message_id INTEGER NOT NULL,
+        spawn_timestamp INTEGER NOT NULL,
+        night_vision_activator INTEGER
+    )''')
+
     conn.commit()
     conn.close()
 
@@ -823,6 +840,25 @@ def update_balance(guild_id: int, user_id: int, amount: float):
             else:
                 logger.error(f"Failed to update balance after {max_retries} retries: {e}")
                 raise
+
+
+async def update_balance_and_check_trophies(bot, guild_id: int, user_id: int, amount: float):
+    """Update balance then check dragon_millionaire trophy on gains."""
+    import asyncio
+    await asyncio.to_thread(update_balance, guild_id, user_id, amount)
+    if amount <= 0:
+        return
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=60.0)
+        c = conn.cursor()
+        c.execute('SELECT balance FROM users WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
+        row = c.fetchone()
+        conn.close()
+        if row and row[0] >= 1_000_000:
+            from achievements import award_trophy
+            await award_trophy(bot, guild_id, user_id, 'dragon_millionaire')
+    except Exception:
+        pass
 
 
 # ==================== EMBED HELPERS ====================

@@ -17,6 +17,7 @@ from config import DRAGONNEST_UPGRADES, CONSUMABLE_ITEMS, MYSTERY_BOX_POOL, DICE
 from database import get_user, update_balance, get_active_item, is_player_softlocked
 from state import active_luckycharms, active_usable_items
 from utils import format_time_remaining, check_dragonpass_quests
+from achievements import send_quest_notification
 
 
 class EconomyCog(commands.Cog):
@@ -136,7 +137,9 @@ class EconomyCog(commands.Cog):
         await interaction.edit_original_response(embed=final_embed)
 
         # Track for dragonpass quest
-        await asyncio.to_thread(check_dragonpass_quests, interaction.guild_id, interaction.user.id, 'use_casino', 1)
+        _qr = await asyncio.to_thread(check_dragonpass_quests, interaction.guild_id, interaction.user.id, 'use_casino', 1)
+        if _qr and _qr[3]:
+            await send_quest_notification(interaction.client, interaction.guild_id, interaction.user.id, _qr[3])
 
     # ==================== SHOP ====================
 
@@ -190,6 +193,7 @@ class EconomyCog(commands.Cog):
             'consumable_war_drum':           {'name': 'War Drum',           'price': 4000,   'emoji': '🥁'},
             'consumable_shield_rune':        {'name': 'Shield Rune',        'price': 3500,   'emoji': '🔷'},
             'consumable_server_trophy':      {'name': 'Server Trophy',      'price': 25000,  'emoji': '🥇'},
+            'consumable_supporter_trophy':   {'name': 'Supporter Trophy',   'price': 50000,  'emoji': '🎖️'},
         }
 
         # ── Category definitions ─────────────────────────────────────────────
@@ -292,10 +296,13 @@ class EconomyCog(commands.Cog):
                 'description': 'Purely cosmetic items displayed in your profile.',
                 'lines': [
                     '🥇 **Server Trophy** — 25,000 🪙',
-                    '   └─ Displayed as trophies in your `/stats` profile',
+                    '   └─ Displayed as trophies in your `/stats` profile (limit: 1)',
+                    '🎖️ **Supporter Trophy** — 50,000 🪙',
+                    '   └─ Exclusive supporter cosmetic in your `/stats` profile (limit: 1)',
                 ],
                 'options': [
-                    discord.SelectOption(label="Server Trophy", description="25,000 🪙 - Shown in /stats", emoji="🥇", value="consumable_server_trophy"),
+                    discord.SelectOption(label="Server Trophy",    description="25,000 🪙 - Shown in /stats (limit: 1)", emoji="🥇", value="consumable_server_trophy"),
+                    discord.SelectOption(label="Supporter Trophy", description="50,000 🪙 - Shown in /stats (limit: 1)", emoji="🎖️", value="consumable_supporter_trophy"),
                 ],
             },
         }
@@ -519,8 +526,28 @@ class EconomyCog(commands.Cog):
                                 'war_drum': "Auto-consumed on your next raid attack for +10% damage!",
                                 'shield_rune': "Auto-consumed to give consolation coins if your raid tier escapes!",
                                 'server_trophy': "Displayed as trophies in your `/stats` profile!",
+                                'supporter_trophy': "Displayed as a trophy in your `/stats` profile!",
                             }
                             hint = consumable_hints.get(item, "Use it from `/inventory`!")
+
+                            # Enforce 1x purchase limit for shop trophies
+                            if item in ('server_trophy', 'supporter_trophy'):
+                                try:
+                                    _conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                    _c = _conn.cursor()
+                                    _c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
+                                               (interaction.guild_id, modal_interaction.user.id, item))
+                                    _row = _c.fetchone()
+                                    _conn.close()
+                                    if _row and _row[0] >= 1:
+                                        await modal_interaction.response.send_message(
+                                            '❌ You already own this trophy! Each trophy can only be purchased once.',
+                                            ephemeral=True,
+                                        )
+                                        return
+                                except Exception:
+                                    pass
+
                             await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, -total_price)
                             try:
                                 conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
@@ -779,7 +806,9 @@ class EconomyCog(commands.Cog):
                 )
 
             # Track coinflip quest
-            await asyncio.to_thread(check_dragonpass_quests, guild_id, user_id, 'use_coinflip', 1)
+            _qr = await asyncio.to_thread(check_dragonpass_quests, guild_id, user_id, 'use_coinflip', 1)
+            if _qr and _qr[3]:
+                await send_quest_notification(interaction.client, guild_id, user_id, _qr[3])
 
             conn.close()
             await interaction.followup.send(embed=embed)
@@ -914,8 +943,12 @@ class EconomyCog(commands.Cog):
                 conn.close()
 
                 # Track coinflip quest for both players
-                await asyncio.to_thread(check_dragonpass_quests, interaction.guild_id, self.challenger_id, 'use_coinflip', 1)
-                await asyncio.to_thread(check_dragonpass_quests, interaction.guild_id, self.opponent_id, 'use_coinflip', 1)
+                _qr_c = await asyncio.to_thread(check_dragonpass_quests, interaction.guild_id, self.challenger_id, 'use_coinflip', 1)
+                if _qr_c and _qr_c[3]:
+                    await send_quest_notification(interaction.client, interaction.guild_id, self.challenger_id, _qr_c[3])
+                _qr_o = await asyncio.to_thread(check_dragonpass_quests, interaction.guild_id, self.opponent_id, 'use_coinflip', 1)
+                if _qr_o and _qr_o[3]:
+                    await send_quest_notification(interaction.client, interaction.guild_id, self.opponent_id, _qr_o[3])
 
                 winner = interaction.guild.get_member(winner_id)
                 loser = interaction.guild.get_member(loser_id)

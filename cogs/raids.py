@@ -17,7 +17,7 @@ from state import *
 import database
 from database import is_player_softlocked, update_balance
 from utils import *
-from achievements import check_and_award_achievements
+from achievements import check_and_award_achievements, award_trophy, send_quest_notification
 
 logger = logging.getLogger(__name__)
 
@@ -888,7 +888,9 @@ class RaidBossStatusView(discord.ui.View):
 
         await check_and_award_achievements(btn_interaction.guild_id, btn_interaction.user.id, bot=self.bot)
 
-        await asyncio.to_thread(check_dragonpass_quests, btn_interaction.guild_id, btn_interaction.user.id, 'attack_raidboss', 1)
+        _qr = await asyncio.to_thread(check_dragonpass_quests, btn_interaction.guild_id, btn_interaction.user.id, 'attack_raidboss', 1)
+        if _qr and _qr[3]:
+            await send_quest_notification(btn_interaction.client, btn_interaction.guild_id, btn_interaction.user.id, _qr[3])
 
         await btn_interaction.response.send_message(
             f"⚔️ {btn_interaction.user.mention} dealt **{damage:,}** damage!\n"
@@ -927,6 +929,7 @@ class RaidBossStatusView(discord.ui.View):
             participants_list = eval(participants_str) if participants_str else []
 
         if new_hp <= 0:
+            await award_trophy(btn_interaction.client, btn_interaction.guild_id, btn_interaction.user.id, 'raid_destroyer')
             reward_data = DRAGON_TYPES[reward_dragon]
             c_a.execute('SELECT user_id, damage_dealt FROM raid_damage WHERE guild_id = ? ORDER BY damage_dealt DESC LIMIT 10', (btn_interaction.guild_id,))
             top_damagers = c_a.fetchall()

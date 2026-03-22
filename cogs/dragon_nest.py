@@ -17,7 +17,7 @@ from state import *
 import database
 from database import is_player_softlocked, update_balance, get_user
 from utils import *
-from achievements import check_and_award_achievements
+from achievements import check_and_award_achievements, award_trophy
 
 
 class DragonNestCog(commands.Cog):
@@ -400,6 +400,9 @@ class DragonNestCog(commands.Cog):
 
                         conn.commit()
                         conn.close()
+
+                        if current_level == 10:
+                            await award_trophy(btn_interaction.client, self.guild_id, self.user_id, 'nest_master')
 
                         await check_and_award_achievements(self.guild_id, self.user_id, bot=btn_interaction.client)
 
@@ -1677,8 +1680,10 @@ class DragonNestCog(commands.Cog):
                                           (self.next_level, self.guild_id, self.user_id))
                         c_upgrade.execute('DELETE FROM user_dragons WHERE guild_id = ? AND user_id = ?',
                                           (self.guild_id, self.user_id))
-                        c_upgrade.execute('DELETE FROM user_items WHERE guild_id = ? AND user_id = ?',
-                                          (self.guild_id, self.user_id))
+                        c_upgrade.execute(
+                            'DELETE FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type NOT IN (?, ?)',
+                            (self.guild_id, self.user_id, 'server_trophy', 'supporter_trophy')
+                        )
                         c_upgrade.execute('DELETE FROM active_items WHERE guild_id = ? AND user_id = ?',
                                           (self.guild_id, self.user_id))
                         c_upgrade.execute('DELETE FROM user_luckycharms WHERE guild_id = ? AND user_id = ?',

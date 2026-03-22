@@ -17,7 +17,7 @@ from discord.ext import commands
 from config import (
     DRAGON_TYPES, DRAGON_RARITY_TIERS, DRAGONNEST_UPGRADES, LEVEL_NAMES,
     PACK_TYPES, RARITY_DAMAGE, USABLE_ITEMS,
-    MYSTERY_BOX_POOL, DICE_OF_FATE_EFFECTS
+    MYSTERY_BOX_POOL, DICE_OF_FATE_EFFECTS, TROPHY_EMOJIS, EARNED_TROPHIES
 )
 from database import (
     get_user, update_balance, get_active_item, activate_item,
@@ -733,7 +733,7 @@ class InventoryItemsView(discord.ui.View):
             description = f"**{prize_label}** has been added to your inventory!"
 
         elif prize['type'] == 'pack':
-            pack_type = prize['pack_type']
+            pack_type = prize['pack_type'].replace('pack_', '')  # Remove 'pack_' prefix to match PACK_TYPES keys
             c.execute('''INSERT INTO user_packs (guild_id, user_id, pack_type, count) VALUES (?, ?, ?, 1)
                          ON CONFLICT(guild_id, user_id, pack_type) DO UPDATE SET count = count + 1''',
                       (self.guild_id, self.user_id, pack_type))
@@ -1701,11 +1701,20 @@ class DragonsCog(commands.Cog):
         if all_user_dragons:
             rarest_dragon = min(all_user_dragons, key=lambda x: DRAGON_TYPES[x[0]]['spawn_chance'])[0]
 
-        # Get Server Trophy count
-        c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
-                  (guild_id, user_id, 'server_trophy'))
-        trophy_result = c.fetchone()
-        trophy_count = trophy_result[0] if trophy_result else 0
+        # Get all trophies (shop + earned)
+        _shop_trophy_types = ['server_trophy', 'supporter_trophy']
+        shop_trophies = []
+        for _t in _shop_trophy_types:
+            c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
+                      (guild_id, user_id, _t))
+            _r = c.fetchone()
+            if _r and _r[0] > 0:
+                shop_trophies.append(_t)
+
+        c.execute('SELECT trophy_id FROM user_trophies WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
+        earned_trophies_list = [row[0] for row in c.fetchall()]
+
+        all_trophy_ids = shop_trophies + earned_trophies_list
 
         # Get fastest and slowest catch times
         c.execute('''SELECT dragon_type, fastest_catch FROM user_dragons
@@ -1795,6 +1804,13 @@ class DragonsCog(commands.Cog):
                 ),
                 inline=True,
             )
+            if all_trophy_ids:
+                _shop_names = {'server_trophy': 'Server Trophy', 'supporter_trophy': 'Supporter Trophy'}
+                trophy_display = '  '.join(
+                    f"{TROPHY_EMOJIS.get(tid, '🏆')} **{EARNED_TROPHIES[tid]['name'] if tid in EARNED_TROPHIES else _shop_names.get(tid, tid)}**"
+                    for tid in all_trophy_ids
+                )
+                e.add_field(name='🏆 Trophies', value=trophy_display, inline=False)
             e.set_footer(text="Page 1/3")
             return e
 

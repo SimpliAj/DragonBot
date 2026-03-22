@@ -19,7 +19,8 @@ from config import (
     DEV_USER_ID, DRAGON_RARITY_TIERS, DRAGON_TYPES, DRAGONNEST_UPGRADES,
     ERROR_WEBHOOK_URL, LEVEL_NAMES, PACK_TYPES,
 )
-from database import get_user, get_user_async, init_db, is_player_softlocked, update_balance
+from achievements import award_trophy, send_quest_notification
+from database import get_user, get_user_async, init_db, is_player_softlocked, update_balance, update_balance_and_check_trophies
 from state import (
     active_dragonscales, active_dragonfest, active_luckycharms,
     active_spawns, active_usable_items, dragonscale_event_starts,
@@ -91,17 +92,32 @@ async def spawn_dragon(guild_id: int, channel, bot=None, catcher_id: int = None)
         color=discord.Color.green()
     )
     embed.set_thumbnail(url=dragon_data['image'])
-    embed.set_footer(text=f"Coins: {displayed_coins} 🪙¦ Rarity: {dragon_data['spawn_chance']:.2f}%")
+    dragon_rarity = get_dragon_rarity(dragon_key)
+    embed.set_footer(text=f"Coins: {displayed_coins} 🪙¦ Rarity: {dragon_rarity.capitalize()} ({dragon_data['spawn_chance']:.2f}%)")
 
     msg = await channel.send(embed=embed)
 
+    spawn_ts = int(time.time())
+    nv_activator = night_vision_activator if night_vision_active else None
     active_spawns[guild_id] = {
         'dragon_type': dragon_key,
         'channel_id': channel.id,
         'message_id': msg.id,
-        'timestamp': time.time(),
-        'night_vision_activator': night_vision_activator if night_vision_active else None
+        'timestamp': spawn_ts,
+        'night_vision_activator': nv_activator
     }
+
+    try:
+        _conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        _c = _conn.cursor()
+        _c.execute(
+            'INSERT OR REPLACE INTO active_dragon_spawns (guild_id, dragon_type, channel_id, message_id, spawn_timestamp, night_vision_activator) VALUES (?, ?, ?, ?, ?, ?)',
+            (guild_id, dragon_key, channel.id, msg.id, spawn_ts, nv_activator)
+        )
+        _conn.commit()
+        _conn.close()
+    except Exception as _e:
+        print(f'[spawn] Failed to persist active spawn: {_e}')
 
     # Dragon stays until caught (no despawn timer)
 
@@ -1229,6 +1245,7 @@ class EventsCog(commands.Cog):
                         c_catch = conn_catch.cursor()
                         c_catch.execute('UPDATE spawn_config SET last_spawn_time = ? WHERE guild_id = ?',
                                       (int(time.time()), guild_id))
+                        c_catch.execute('DELETE FROM active_dragon_spawns WHERE guild_id = ?', (guild_id,))
                         conn_catch.commit()
                         conn_catch.close()
                     except:
@@ -1364,7 +1381,7 @@ class EventsCog(commands.Cog):
                     # Add dragons and coins to user
                     if final_amount > 0:
                         await add_dragons(guild_id, message.author.id, dragon_key, final_amount)
-                        update_bingo_on_catch(guild_id, message.author.id, dragon_key)
+                        bingo_just_completed = update_bingo_on_catch(guild_id, message.author.id, dragon_key)
                         base_coins = max(2, int(dragon_data['value'] * final_amount))
                         coins_earned = base_coins
 
@@ -1385,7 +1402,7 @@ class EventsCog(commands.Cog):
                         if _get_active_item(guild_id, message.author.id, 'gold_rush'):
                             coins_earned = int(coins_earned * 1.5)
 
-                        await asyncio.to_thread(update_balance, guild_id, message.author.id, coins_earned)
+                        await update_balance_and_check_trophies(self.bot, guild_id, message.author.id, coins_earned)
 
                         # Track dragonfest catches if active
                         dragonfest_data = active_dragonfest.get(guild_id)
@@ -1447,7 +1464,14 @@ class EventsCog(commands.Cog):
                         conn_dp.close()
 
                         result = await asyncio.to_thread(check_dragonpass_quests, guild_id, message.author.id, 'catch_dragon', final_amount, dragon_key)
-                        await asyncio.to_thread(check_dragonpass_quests, guild_id, message.author.id, 'earn_coins', int(coins_earned))
+                        if result:
+                            coins, level_delta, trophies, quest_info = result
+                            for _tid in trophies:
+                                await award_trophy(self.bot, guild_id, message.author.id, _tid)
+                            await send_quest_notification(self.bot, guild_id, message.author.id, quest_info)
+                        _r2 = await asyncio.to_thread(check_dragonpass_quests, guild_id, message.author.id, 'earn_coins', int(coins_earned))
+                        if _r2 and _r2[3]:
+                            await send_quest_notification(self.bot, guild_id, message.author.id, _r2[3])
 
                         if result and result[1] > 0:
                             level_up_count = result[1]
@@ -1614,6 +1638,38 @@ class EventsCog(commands.Cog):
 
                         conn.commit()
                         conn.close()
+
+                        # Trophy checks after catch
+                        _dragon_data = DRAGON_TYPES.get(spawn_data['dragon_type'], {})
+                        _rarity = _dragon_data.get('rarity', '')
+
+                        if _rarity in ('mythic', 'ultra'):
+                            await award_trophy(self.bot, guild_id, message.author.id, 'mythic_hunter')
+
+                        _conn_s = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                        _c_s = _conn_s.cursor()
+                        _c_s.execute('SELECT COUNT(*) FROM user_dragons WHERE guild_id = ? AND user_id = ? AND count > 0',
+                                     (guild_id, message.author.id))
+                        _unique = _c_s.fetchone()[0]
+                        _conn_s.close()
+                        if _unique >= len(DRAGON_TYPES):
+                            await award_trophy(self.bot, guild_id, message.author.id, 'dragon_scholar')
+
+                        # Auto-bingo completion notification
+                        if bingo_just_completed:
+                            try:
+                                await update_balance_and_check_trophies(self.bot, guild_id, message.author.id, 500)
+                                _bq = await asyncio.to_thread(check_dragonpass_quests, guild_id, message.author.id, 'complete_bingo', 1)
+                                if _bq and _bq[3]:
+                                    await send_quest_notification(self.bot, guild_id, message.author.id, _bq[3])
+                                bingo_embed = discord.Embed(
+                                    title="🎉 BINGO!",
+                                    description=f"**{message.author.mention} completed a bingo line!**\n🏆 Reward: **500** 🪙",
+                                    color=discord.Color.gold()
+                                )
+                                await message.channel.send(content=message.author.mention, embed=bingo_embed)
+                            except Exception as e:
+                                logger.error(f"Bingo completion handling failed: {e}")
 
                     # Add packs if any
                     if pack_rewards:

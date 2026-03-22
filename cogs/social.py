@@ -10,7 +10,7 @@ from config import (
     LEVEL_NAMES, DRAGON_TYPES, DRAGON_RARITY_TIERS, ACHIEVEMENTS
 )
 from utils import format_time_remaining, safe_json_loads
-from achievements import check_and_award_achievements
+from achievements import check_and_award_achievements, send_quest_notification
 from database import update_balance
 from utils import check_dragonpass_quests
 
@@ -246,7 +246,9 @@ class SocialCog(commands.Cog):
 
         conn.close()
 
-        await asyncio.to_thread(check_dragonpass_quests, guild_id, user_id, 'check_bingo', 1)
+        _qr = await asyncio.to_thread(check_dragonpass_quests, guild_id, user_id, 'check_bingo', 1)
+        if _qr and _qr[3]:
+            await send_quest_notification(interaction.client, guild_id, user_id, _qr[3])
 
         card_display = ""
         for row in range(5):
@@ -303,7 +305,9 @@ class SocialCog(commands.Cog):
                 logger.error(f"Error marking bingo as completed: {e}")
 
             try:
-                await asyncio.to_thread(check_dragonpass_quests, guild_id, user_id, 'complete_bingo', 1)
+                _qr = await asyncio.to_thread(check_dragonpass_quests, guild_id, user_id, 'complete_bingo', 1)
+                if _qr and _qr[3]:
+                    await send_quest_notification(interaction.client, guild_id, user_id, _qr[3])
             except Exception as e:
                 logger.error(f"Error tracking bingo completion quest: {e}")
 

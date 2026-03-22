@@ -17,6 +17,7 @@ from state import *
 import database
 from database import is_player_softlocked, update_balance
 from utils import *
+from achievements import send_quest_notification
 
 
 class PacksCog(commands.Cog):
@@ -684,7 +685,9 @@ class PacksCog(commands.Cog):
                     await interaction.edit_original_response(embed=final_embed)
 
                     # Track for dragonpass quest
-                    await asyncio.to_thread(check_dragonpass_quests, self.guild_id, self.user_id, 'open_pack', 1)
+                    _qr = await asyncio.to_thread(check_dragonpass_quests, self.guild_id, self.user_id, 'open_pack', 1)
+                    if _qr and _qr[3]:
+                        await send_quest_notification(interaction.client, self.guild_id, self.user_id, _qr[3])
 
                     # Update the original pack list message
                     await asyncio.sleep(2)

@@ -100,10 +100,10 @@ async def add_dragons(guild_id: int, user_id: int, dragon_type: str, count: int)
         return False
 
 
-def update_bingo_on_catch(guild_id: int, user_id: int, dragon_type: str):
-    """Update bingo card when a dragon is caught."""
+def update_bingo_on_catch(guild_id: int, user_id: int, dragon_type: str) -> bool:
+    """Update bingo card when a dragon is caught. Returns True if bingo newly completed."""
     if not validate_dragon_type(dragon_type):
-        return
+        return False
 
     lock = get_quest_lock(guild_id, user_id)
 
@@ -119,33 +119,61 @@ def update_bingo_on_catch(guild_id: int, user_id: int, dragon_type: str):
                 card_data = c.fetchone()
 
                 if not card_data:
-                    return
+                    return False
 
                 card_str, marked_str, created_at, expires_at, completed = card_data
 
                 if current_time > expires_at or completed:
-                    return
+                    return False
 
                 card = card_str.split(',')
                 marked = safe_json_loads(marked_str, [])
 
-                card_updated = False
+                # Ensure FREE space (position 12) is marked
+                if 12 not in marked:
+                    marked.append(12)
+
+                # Mark all positions matching the caught dragon type
                 for i, card_dragon in enumerate(card):
                     if card_dragon == dragon_type and i not in marked:
                         marked.append(i)
-                        card_updated = True
 
-                if card_updated:
-                    c.execute('UPDATE bingo_cards SET marked_positions = ? WHERE guild_id = ? AND user_id = ?',
-                              (json.dumps(marked), guild_id, user_id))
-                    conn.commit()
+                # Check for a completed bingo line
+                def _check_bingo(marked_positions, card_size=5):
+                    lines = []
+                    for row in range(card_size):
+                        lines.append([row * card_size + col for col in range(card_size)])
+                    for col in range(card_size):
+                        lines.append([row * card_size + col for row in range(card_size)])
+                    lines.append([i * card_size + i for i in range(card_size)])
+                    lines.append([i * card_size + (card_size - 1 - i) for i in range(card_size)])
+                    for line in lines:
+                        if all(pos in marked_positions for pos in line):
+                            return True
+                    return False
+
+                has_bingo = _check_bingo(marked)
+
+                if has_bingo:
+                    c.execute(
+                        'UPDATE bingo_cards SET marked_positions = ?, completed = 1 WHERE guild_id = ? AND user_id = ?',
+                        (json.dumps(marked), guild_id, user_id)
+                    )
+                else:
+                    c.execute(
+                        'UPDATE bingo_cards SET marked_positions = ? WHERE guild_id = ? AND user_id = ?',
+                        (json.dumps(marked), guild_id, user_id)
+                    )
+                conn.commit()
+                return has_bingo
             finally:
                 conn.close()
 
     try:
-        safe_db_operation(_update_bingo)
+        return safe_db_operation(_update_bingo) or False
     except Exception as e:
         logger.error(f"Bingo update failed: {str(e)[:100]}")
+        return False
 
 
 # ==================== BREEDING XP SYSTEM ====================
@@ -400,8 +428,9 @@ def check_dragonpass_quests(guild_id: int, user_id: int, action_type: str, amoun
                           (str(quests), quest_refresh_time, guild_id, user_id))
                 conn.commit()
                 conn.close()
-                return 0, 0
+                return 0, 0, [], None
 
+            newly_completed = []
             for quest in quests:
                 quest_type = quest['type']
                 target_amount = quest['amount']
@@ -433,6 +462,7 @@ def check_dragonpass_quests(guild_id: int, user_id: int, action_type: str, amoun
                 if current_progress >= target_amount and quest.get('completed') is not True:
                     coins_gained += reward
                     quest['completed'] = True
+                    newly_completed.append(quest)
 
                 quest['progress'] = current_progress
                 updated_quests.append(quest)
@@ -443,6 +473,7 @@ def check_dragonpass_quests(guild_id: int, user_id: int, action_type: str, amoun
 
             completed_count = sum(1 for q in updated_quests if q.get('completed', False))
             new_level = current_level
+            pack_type = None
 
             if completed_count >= 3 and coins_gained > 0 and new_level < 30:
                 new_level += 1
@@ -476,7 +507,21 @@ def check_dragonpass_quests(guild_id: int, user_id: int, action_type: str, amoun
 
             conn.commit()
             conn.close()
-            return coins_gained, new_level - current_level
+            trophies_to_award = []
+            if completed_count >= 3 and coins_gained > 0:
+                trophies_to_award.append('quest_master')
+            if new_level == 30 and current_level < 30:
+                trophies_to_award.append('dragonpass_legend')
+            remaining_quests = [q for q in updated_quests if not q.get('completed', False)]
+            quest_info = {
+                'newly_completed': newly_completed,
+                'remaining': remaining_quests,
+                'level_delta': new_level - current_level,
+                'pack_type': pack_type,
+                'coins': coins_gained,
+                'new_level': new_level,
+            } if newly_completed else None
+            return coins_gained, new_level - current_level, trophies_to_award, quest_info
 
         except sqlite3.OperationalError as e:
             logger.error(f"Database error in check_dragonpass_quests for user {user_id} in guild {guild_id}: {e}")

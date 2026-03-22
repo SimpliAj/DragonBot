@@ -4,9 +4,147 @@ import time
 import logging
 import discord
 
-from config import ACHIEVEMENTS, DRAGON_RARITY_TIERS
+from config import ACHIEVEMENTS, DRAGON_RARITY_TIERS, EARNED_TROPHIES, TROPHY_EMOJIS
 
 logger = logging.getLogger(__name__)
+
+
+async def award_trophy(bot: discord.Client, guild_id: int, user_id: int, trophy_id: str):
+    """Award an earned trophy if not already owned. Sends notification to spawn channel."""
+    trophy = EARNED_TROPHIES.get(trophy_id)
+    if not trophy:
+        return
+
+    try:
+        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        c = conn.cursor()
+        c.execute(
+            'SELECT 1 FROM user_trophies WHERE guild_id = ? AND user_id = ? AND trophy_id = ?',
+            (guild_id, user_id, trophy_id),
+        )
+        if c.fetchone():
+            conn.close()
+            return  # already earned
+
+        c.execute(
+            'INSERT INTO user_trophies (guild_id, user_id, trophy_id, earned_at) VALUES (?, ?, ?, ?)',
+            (guild_id, user_id, trophy_id, int(time.time())),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f'award_trophy DB error: {e}')
+        return
+
+    if not bot:
+        return
+
+    try:
+        conn2 = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        c2 = conn2.cursor()
+        c2.execute('SELECT spawn_channel FROM guild_settings WHERE guild_id = ?', (guild_id,))
+        row = c2.fetchone()
+        conn2.close()
+        if not row or not row[0]:
+            return
+
+        channel = bot.get_channel(row[0])
+        if not channel:
+            return
+
+        member = channel.guild.get_member(user_id)
+        display_name = member.display_name if member else f'<@{user_id}>'
+        emoji = trophy['icon']
+
+        embed = discord.Embed(
+            title=f'{emoji} Trophy Unlocked!',
+            description=f'**{display_name}** earned the **{trophy["name"]}** trophy!\n\n_{trophy["description"]}_',
+            color=0xF1C40F,
+        )
+        await channel.send(embed=embed)
+    except Exception as e:
+        logger.error(f'award_trophy notification error: {e}')
+
+
+async def send_quest_notification(bot: discord.Client, guild_id: int, user_id: int, quest_info: dict):
+    """Send a quest completion notification to the guild's spawn channel."""
+    if not bot or not quest_info or not quest_info.get('newly_completed'):
+        return
+
+    try:
+        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        c = conn.cursor()
+        c.execute('SELECT spawn_channel FROM guild_settings WHERE guild_id = ?', (guild_id,))
+        row = c.fetchone()
+        conn.close()
+        if not row or not row[0]:
+            return
+
+        channel = bot.get_channel(row[0])
+        if not channel:
+            return
+
+        member = channel.guild.get_member(user_id)
+        display_name = member.mention if member else f'<@{user_id}>'
+
+        def _quest_label(q):
+            qt = q.get('type', '')
+            amt = q.get('amount', 1)
+            rarity = q.get('rarity', 'common')
+            labels = {
+                'catch_dragons': f'Catch {amt} Dragons',
+                'catch_rarity_or_higher': f'Catch {amt} {rarity.capitalize()}+ Dragons',
+                'earn_coins': f'Earn {amt:,} Coins',
+                'use_casino': f'Use Casino {amt}x',
+                'open_packs': f'Open {amt} Packs',
+                'use_coinflip': f'Coinflip {amt}x',
+                'check_bingo': f'Check Bingo {amt}x',
+                'complete_bingo': f'Complete Bingo {amt}x',
+                'vote_topgg': f'Vote on Top.gg {amt}x',
+                'attack_raidboss': f'Attack Raid Boss {amt}x',
+            }
+            return labels.get(qt, qt)
+
+        newly = quest_info['newly_completed']
+        remaining = quest_info['remaining']
+        level_delta = quest_info.get('level_delta', 0)
+        pack_type = quest_info.get('pack_type')
+        new_level = quest_info.get('new_level', 0)
+        all_done = len(remaining) == 0
+
+        if all_done:
+            title = '🏆 All Quests Completed!'
+            color = 0xF1C40F
+        else:
+            title = f'🎯 Quest{"s" if len(newly) > 1 else ""} Completed!'
+            color = 0x57F287
+
+        desc_lines = [f'{display_name} completed {len(newly)} Dragonpass quest{"s" if len(newly) > 1 else ""}!\n']
+        for q in newly:
+            desc_lines.append(f'✅ {_quest_label(q)} (+{q.get("reward", 0):,} 🪙)')
+
+        if remaining:
+            desc_lines.append('\n📋 **Remaining Quests:**')
+            for q in remaining:
+                prog = q.get('progress', 0)
+                tgt = q.get('amount', 1)
+                desc_lines.append(f'• {_quest_label(q)} — {prog}/{tgt}')
+
+        if level_delta > 0:
+            desc_lines.append(f'\n🎁 **Level Up!** Dragonpass Level **{new_level}**')
+            if pack_type:
+                desc_lines.append(f'📦 Reward: **{pack_type.capitalize()} Pack**')
+        elif all_done and not level_delta:
+            desc_lines.append('\n⏳ Next level requires all quests again after refresh.')
+
+        embed = discord.Embed(
+            title=title,
+            description='\n'.join(desc_lines),
+            color=color,
+        )
+        await channel.send(embed=embed)
+    except Exception as e:
+        logger.error(f'send_quest_notification error: {e}')
 
 
 async def check_and_award_achievements(

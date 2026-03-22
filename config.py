@@ -423,6 +423,11 @@ CONSUMABLE_ITEMS = {
         'description': 'Cosmetic — displayed in your /stats profile',
         'shop_cost': 25000,
     },
+    'supporter_trophy': {
+        'name': 'Supporter Trophy', 'emoji': '🎖️', 'rarity': 'legendary',
+        'description': 'Cosmetic — displayed in your /stats profile',
+        'shop_cost': 50000,
+    },
     'mystery_box': {
         'name': 'Mystery Box', 'emoji': '❓', 'rarity': 'rare',
         'description': 'Contains a random item — could be anything!',
@@ -580,6 +585,69 @@ ACHIEVEMENTS = {
     'vote_100': {'name': 'Top Voter', 'description': 'Vote 100 times total', 'category': '🗳️ Voting', 'requirement': 100, 'reward_coins': 10000, 'icon': '🏅'},
     'vote_streak_7': {'name': 'Weekly Supporter', 'description': 'Maintain a 7-day vote streak', 'category': '🗳️ Voting', 'requirement': 7, 'reward_coins': 1000, 'icon': '🔥'},
     'vote_streak_30': {'name': 'Monthly Supporter', 'description': 'Maintain a 30-day vote streak', 'category': '🗳️ Voting', 'requirement': 30, 'reward_coins': 5000, 'icon': '💎'},
+}
+
+# ==================== TROPHY CONFIG ====================
+TROPHY_EMOJIS = {
+    'server_trophy':      '<:server_trophy:1485065649737826395>',
+    'supporter_trophy':   '🎖️',        # replace with <:name:ID> when custom emoji is ready
+    'quest_master':       '<:quest_master:1485066499012952115>',
+    'nest_master':        '🏰',        # replace with <:name:ID> when custom emoji is ready
+    'dragonpass_legend':  '🎫',        # replace with <:name:ID> when custom emoji is ready
+    'dragon_scholar':     '🐉',        # replace with <:name:ID> when custom emoji is ready
+    'raid_destroyer':     '⚔️',        # replace with <:name:ID> when custom emoji is ready
+    'dragon_millionaire': '💰',        # replace with <:name:ID> when custom emoji is ready
+    'breeding_master':    '🥚',        # replace with <:name:ID> when custom emoji is ready
+    'alpha_lord':         '✨',        # replace with <:name:ID> when custom emoji is ready
+    'mythic_hunter':      '🌟',        # replace with <:name:ID> when custom emoji is ready
+}
+
+EARNED_TROPHIES = {
+    'quest_master': {
+        'name': 'Quest Master',
+        'description': 'Complete all 3 active Dragonpass quests in one refresh',
+        'icon': TROPHY_EMOJIS['quest_master'],
+    },
+    'nest_master': {
+        'name': 'Nest Master',
+        'description': 'Reach Dragon Nest level 10',
+        'icon': TROPHY_EMOJIS['nest_master'],
+    },
+    'dragonpass_legend': {
+        'name': 'Dragonpass Legend',
+        'description': 'Complete Dragonpass level 30',
+        'icon': TROPHY_EMOJIS['dragonpass_legend'],
+    },
+    'dragon_scholar': {
+        'name': 'Dragon Scholar',
+        'description': 'Catch every dragon type at least once',
+        'icon': TROPHY_EMOJIS['dragon_scholar'],
+    },
+    'raid_destroyer': {
+        'name': 'Raid Destroyer',
+        'description': 'Land the killing blow on a raid boss',
+        'icon': TROPHY_EMOJIS['raid_destroyer'],
+    },
+    'dragon_millionaire': {
+        'name': 'Dragon Millionaire',
+        'description': 'Reach a balance of 1,000,000 coins',
+        'icon': TROPHY_EMOJIS['dragon_millionaire'],
+    },
+    'breeding_master': {
+        'name': 'Breeding Master',
+        'description': 'Reach breeding level 10',
+        'icon': TROPHY_EMOJIS['breeding_master'],
+    },
+    'alpha_lord': {
+        'name': 'Alpha Lord',
+        'description': 'Create 10 Alpha Dragons',
+        'icon': TROPHY_EMOJIS['alpha_lord'],
+    },
+    'mythic_hunter': {
+        'name': 'Mythic Hunter',
+        'description': 'Catch a Mythic or Ultra dragon',
+        'icon': TROPHY_EMOJIS['mythic_hunter'],
+    },
 }
 
 # ==================== DRAGON NEST UPGRADE SYSTEM ====================

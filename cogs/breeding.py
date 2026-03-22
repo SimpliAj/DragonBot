@@ -17,6 +17,7 @@ from state import *
 import database
 from database import is_player_softlocked, update_balance
 from utils import *
+from achievements import award_trophy
 
 
 class BreedingCog(commands.Cog):
@@ -355,7 +356,7 @@ class BreedingCog(commands.Cog):
                                                     xp_result = add_breeding_xp(inter4.guild_id, inter4.user.id, BREEDING_XP_GAINS['fail'], cursor=c, conn=conn)
                                                     conn.commit()
                                                     conn.close()
-                                                    return {'status': 'failed', 'roll': roll, 'consumed': consumed, 'dna': dna_break}
+                                                    return {'status': 'failed', 'roll': roll, 'consumed': consumed, 'dna': dna_break, 'new_level': xp_result.get('new_level') if xp_result else None}
 
                                                 # Success
                                                 offspring = random.choice(DRAGON_RARITY_TIERS[result_rarity])
@@ -368,7 +369,7 @@ class BreedingCog(commands.Cog):
                                                 conn.commit()
                                                 conn.close()
 
-                                                return {'status': 'success', 'roll': roll, 'rarity': result_rarity, 'offspring': offspring, 'dna': dna_break, 'hr': hr}
+                                                return {'status': 'success', 'roll': roll, 'rarity': result_rarity, 'offspring': offspring, 'dna': dna_break, 'hr': hr, 'new_level': xp_result.get('new_level') if xp_result else None}
                                             except Exception as e:
                                                 conn.close()
                                                 return {'error': f"❌ Error: {str(e)}"}
@@ -394,6 +395,8 @@ class BreedingCog(commands.Cog):
                                                 color=discord.Color.red()
                                             )
                                             await inter4.followup.send(embed=result_embed)
+                                            if result.get('new_level') == 10:
+                                                await award_trophy(inter4.client, inter4.guild_id, inter4.user.id, 'breeding_master')
                                             if session_key in active_breeding_sessions:
                                                 del active_breeding_sessions[session_key]
                                             return
@@ -421,6 +424,8 @@ class BreedingCog(commands.Cog):
                                             color=discord.Color.gold()
                                         )
                                         await inter4.followup.send(embed=result_embed)
+                                        if result.get('new_level') == 10:
+                                            await award_trophy(inter4.client, inter4.guild_id, inter4.user.id, 'breeding_master')
                                         if session_key in active_breeding_sessions:
                                             del active_breeding_sessions[session_key]
 
