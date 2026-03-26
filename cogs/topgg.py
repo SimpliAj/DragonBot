@@ -144,6 +144,107 @@ def _give_dragonscale(guild_id: int, user_id: int):
         logger.error(f"_give_dragonscale error: {e}")
 
 
+def _mark_vote_quest_done(guild_id: int, user_id: int, bot):
+    """Mark vote_topgg quest as completed in dragonpass for all guilds the user shares with the bot."""
+    import ast
+    import asyncio
+    from achievements import send_quest_notification
+
+    # Collect all guild_ids this user is in
+    all_guild_ids = [g.id for g in bot.guilds if g.get_member(user_id)]
+    if not all_guild_ids:
+        all_guild_ids = [guild_id]  # fallback
+
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+
+        for gid in all_guild_ids:
+            try:
+                c.execute('SELECT quests_active FROM dragonpass WHERE guild_id = ? AND user_id = ?', (gid, user_id))
+                row = c.fetchone()
+                if not row or not row[0]:
+                    continue
+
+                quests = ast.literal_eval(row[0])
+                newly_completed_quest = None
+                for q in quests:
+                    if q.get('type') == 'vote_topgg' and not q.get('completed'):
+                        q['progress'] = q.get('amount', 1)
+                        q['completed'] = True
+                        newly_completed_quest = q
+                        break
+
+                if not newly_completed_quest:
+                    continue
+
+                # Check if all 4 quests are now complete → level up
+                all_complete = all(q.get('completed') for q in quests)
+                level_delta = 0
+                pack_type = None
+                new_level = None
+
+                if all_complete:
+                    c.execute('SELECT level, claimed_levels FROM dragonpass WHERE guild_id = ? AND user_id = ?', (gid, user_id))
+                    lvl_row = c.fetchone()
+                    current_level = lvl_row[0] if lvl_row and lvl_row[0] else 0
+                    claimed_levels = ast.literal_eval(lvl_row[1]) if lvl_row and lvl_row[1] else []
+
+                    if current_level < 30:
+                        new_level = current_level + 1
+                        level_delta = 1
+                        if new_level not in claimed_levels:
+                            claimed_levels.append(new_level)
+
+                        if new_level < 30:
+                            if new_level <= 10:
+                                pack_type = 'stone' if new_level % 2 == 0 else 'wooden'
+                            elif new_level <= 20:
+                                pack_type = 'silver' if new_level % 2 == 0 else 'bronze'
+                            else:
+                                pack_type = 'diamond' if new_level % 2 == 0 else 'gold'
+                            c.execute('''INSERT INTO user_packs (guild_id, user_id, pack_type, count)
+                                         VALUES (?, ?, ?, 1) ON CONFLICT(guild_id, user_id, pack_type)
+                                         DO UPDATE SET count = count + 1''',
+                                      (gid, user_id, pack_type))
+                        elif new_level == 30:
+                            c.execute('''INSERT INTO dragonscales (guild_id, user_id, minutes)
+                                         VALUES (?, ?, 2) ON CONFLICT(guild_id, user_id)
+                                         DO UPDATE SET minutes = minutes + 2''',
+                                      (gid, user_id))
+
+                        c.execute('UPDATE dragonpass SET quests_active = ?, level = ?, claimed_levels = ? WHERE guild_id = ? AND user_id = ?',
+                                  (str(quests), new_level, str(claimed_levels), gid, user_id))
+                    else:
+                        c.execute('UPDATE dragonpass SET quests_active = ? WHERE guild_id = ? AND user_id = ?',
+                                  (str(quests), gid, user_id))
+                else:
+                    c.execute('UPDATE dragonpass SET quests_active = ? WHERE guild_id = ? AND user_id = ?',
+                              (str(quests), gid, user_id))
+
+                conn.commit()
+
+                remaining = [q for q in quests if not q.get('completed')]
+                quest_info = {
+                    'newly_completed': [newly_completed_quest],
+                    'remaining': remaining,
+                    'level_delta': level_delta,
+                    'pack_type': pack_type,
+                    'coins': newly_completed_quest.get('reward', 0),
+                    'new_level': new_level,
+                }
+                asyncio.run_coroutine_threadsafe(
+                    send_quest_notification(bot, gid, user_id, quest_info),
+                    bot.loop
+                )
+            except Exception as e:
+                logger.error(f"_mark_vote_quest_done guild={gid} user={user_id}: {e}", exc_info=True)
+
+        conn.close()
+    except Exception as e:
+        logger.error(f"_mark_vote_quest_done error: {e}", exc_info=True)
+
+
 class TopggCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -209,6 +310,15 @@ class TopggCog(commands.Cog):
                     break
 
         if member is None:
+            for guild in self.bot.guilds:
+                try:
+                    member = await guild.fetch_member(user_id)
+                    if member:
+                        break
+                except Exception:
+                    continue
+
+        if member is None:
             logger.info(f"Vote for user {user_id} — not in any shared guild.")
             return
 
@@ -219,6 +329,12 @@ class TopggCog(commands.Cog):
 
         await self._notify(member, reward, day_in_cycle, streak, total, is_weekend, is_test)
         await check_and_award_achievements(member.guild.id, user_id, bot=self.bot)
+
+        # Mark vote_topgg dragonpass quest as done directly
+        try:
+            await asyncio.to_thread(_mark_vote_quest_done, member.guild.id, user_id, self.bot)
+        except Exception as e:
+            logger.error(f"Vote quest mark failed for user {user_id}: {e}", exc_info=True)
 
     async def _notify(self, user: discord.Member, reward: dict, day_in_cycle: int,
                       streak: int, total: int, is_weekend: bool, is_test: bool):

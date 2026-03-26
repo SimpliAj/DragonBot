@@ -17,6 +17,7 @@ from state import *
 import database
 from database import is_player_softlocked, update_balance
 from utils import *
+from achievements import send_quest_notification
 
 
 class MarketCog(commands.Cog):
@@ -1484,6 +1485,12 @@ class MarketCog(commands.Cog):
                         c.execute('UPDATE trade_offers SET status = "completed" WHERE trade_id = ?', (trade_id,))
                         conn.commit()
 
+                        # Dragonpass quest: complete_trade (both parties)
+                        for _uid in (interaction.user.id, user.id):
+                            _qr = await asyncio.to_thread(check_dragonpass_quests, guild_id, _uid, 'complete_trade')
+                            if _qr and _qr[3]:
+                                await send_quest_notification(interaction.client, guild_id, _uid, _qr[3])
+
                         # Get display names
                         your_emoji = your_item_data['emoji']
                         your_name = your_item_data['name']
@@ -1740,6 +1747,10 @@ class MarketCog(commands.Cog):
                                 conn.commit()
                                 conn.close()
 
+                                _gq = await asyncio.to_thread(check_dragonpass_quests, guild_id, interaction.user.id, 'gift_dragon')
+                                if _gq and _gq[3]:
+                                    await send_quest_notification(modal_interaction.client, guild_id, interaction.user.id, _gq[3])
+
                                 # Confirm message
                                 embed = discord.Embed(
                                     title="🎁 Gift Sent!",
@@ -1841,6 +1852,10 @@ class MarketCog(commands.Cog):
                             conn.commit()
                             conn.close()
 
+                        _gq = await asyncio.to_thread(check_dragonpass_quests, guild_id, interaction.user.id, 'gift_dragon')
+                        if _gq and _gq[3]:
+                            await send_quest_notification(btn_interaction.client, guild_id, interaction.user.id, _gq[3])
+
                         item_data = self.sel_item
                         embed = discord.Embed(
                             title="🎁 Item Gift",
@@ -1919,6 +1934,10 @@ class MarketCog(commands.Cog):
                                       (guild_id, user.id, amount, amount))
                             conn.commit()
                             conn.close()
+
+                            _gq = await asyncio.to_thread(check_dragonpass_quests, guild_id, interaction.user.id, 'gift_dragon')
+                            if _gq and _gq[3]:
+                                await send_quest_notification(modal_interaction.client, guild_id, interaction.user.id, _gq[3])
 
                             # Confirm message
                             embed = discord.Embed(

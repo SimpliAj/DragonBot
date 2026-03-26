@@ -258,19 +258,18 @@ class SocialCog(commands.Cog):
                 dragon_type = card[pos]
 
                 if dragon_type == 'FREE':
-                    row_text += "⭐ "
-                elif pos in marked:
-                    row_text += "✅ "
+                    row_text += "⭐"
                 else:
-                    row_text += "❌ "
-
-                if dragon_type != 'FREE':
                     dragon_data = DRAGON_TYPES.get(dragon_type, {})
-                    row_text += f"{dragon_data.get('name', dragon_type)[:5]:<5} "
-                else:
-                    row_text += "FREE  "
+                    emoji = dragon_data.get('emoji', '🐉')
+                    if pos in marked:
+                        row_text += f"✅"
+                    else:
+                        row_text += f"{emoji}"
 
-            card_display += row_text + "\n"
+                row_text += " "
+
+            card_display += row_text.strip() + "\n"
 
         marked_count = len(marked)
         expires_in = expires_at - current_time
@@ -278,7 +277,7 @@ class SocialCog(commands.Cog):
         embed = discord.Embed(
             title="🎯 Dragon Bingo Card",
             description=f"**Catch dragons to mark your card!**\n\n"
-                        f"```\n{card_display}```\n"
+                        f"{card_display}\n"
                         f"**Progress:** {marked_count}/25 marked\n"
                         f"⏰ Expires in: **{format_time_remaining(expires_in)}**\n\n"
                         f"💡 Get 5 in a row (horizontal, vertical, or diagonal) to win **500** 🪙!",
@@ -328,9 +327,6 @@ class SocialCog(commands.Cog):
         target_user = user or interaction.user
         guild_id = interaction.guild_id
         user_id = target_user.id
-
-        if interaction.user.id == user_id:
-            await check_and_award_achievements(guild_id, user_id, bot=self.bot, interaction=interaction)
 
         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
         c = conn.cursor()
@@ -489,7 +485,7 @@ class SocialCog(commands.Cog):
                 embed.set_footer(text=f"Category {self.current_category_index + 1}/{len(self.categories_list)}")
                 return embed
 
-            @discord.ui.button(label="◀", style=discord.ButtonStyle.blurple, emoji="⬅️")
+            @discord.ui.button(label="◀", style=discord.ButtonStyle.blurple)
             async def previous_category(self, interaction: discord.Interaction, button: discord.ui.Button):
                 if interaction.user.id != self.user_id:
                     await interaction.response.send_message("This is not your achievements!", ephemeral=True)
@@ -497,7 +493,7 @@ class SocialCog(commands.Cog):
                 self.current_category_index = (self.current_category_index - 1) % len(self.categories_list)
                 await interaction.response.edit_message(embed=self.get_category_embed())
 
-            @discord.ui.button(label="▶", style=discord.ButtonStyle.blurple, emoji="➡️")
+            @discord.ui.button(label="▶", style=discord.ButtonStyle.blurple)
             async def next_category(self, interaction: discord.Interaction, button: discord.ui.Button):
                 if interaction.user.id != self.user_id:
                     await interaction.response.send_message("This is not your achievements!", ephemeral=True)

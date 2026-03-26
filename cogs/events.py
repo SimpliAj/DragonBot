@@ -1463,15 +1463,17 @@ class EventsCog(commands.Cog):
                         current_dp_level = dp_result[0] if dp_result else 0
                         conn_dp.close()
 
-                        result = await asyncio.to_thread(check_dragonpass_quests, guild_id, message.author.id, 'catch_dragon', final_amount, dragon_key)
+                        result = await asyncio.to_thread(check_dragonpass_quests, guild_id, message.author.id, 'catch_dragon', final_amount, dragon_key, catch_time)
+                        _r2 = await asyncio.to_thread(check_dragonpass_quests, guild_id, message.author.id, 'earn_coins', int(coins_earned))
+                        _pending_quest_notifications = []
                         if result:
                             coins, level_delta, trophies, quest_info = result
                             for _tid in trophies:
                                 await award_trophy(self.bot, guild_id, message.author.id, _tid)
-                            await send_quest_notification(self.bot, guild_id, message.author.id, quest_info)
-                        _r2 = await asyncio.to_thread(check_dragonpass_quests, guild_id, message.author.id, 'earn_coins', int(coins_earned))
+                            if quest_info:
+                                _pending_quest_notifications.append(quest_info)
                         if _r2 and _r2[3]:
-                            await send_quest_notification(self.bot, guild_id, message.author.id, _r2[3])
+                            _pending_quest_notifications.append(_r2[3])
 
                         if result and result[1] > 0:
                             level_up_count = result[1]
@@ -1622,7 +1624,61 @@ class EventsCog(commands.Cog):
                                             color=discord.Color.green()
                                         )
 
-                                        await message.channel.send(embed=embed)
+                                        _guild_id = guild_id
+                                        _user_id = message.author.id
+                                        _sacrifice_list = sacrifice_list
+                                        _new_level = new_level
+                                        _bot = self.bot
+
+                                        class _NestSacrificeView(discord.ui.View):
+                                            def __init__(self):
+                                                super().__init__(timeout=300)
+                                                btn = discord.ui.Button(label="💾 Submit Dragons", style=discord.ButtonStyle.success)
+                                                btn.callback = self.submit_dragons
+                                                self.add_item(btn)
+
+                                            async def submit_dragons(self, btn_inter: discord.Interaction):
+                                                if btn_inter.user.id != _user_id:
+                                                    await btn_inter.response.send_message("This is not your action!", ephemeral=True)
+                                                    return
+                                                await btn_inter.response.defer()
+                                                conn2 = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                                c2 = conn2.cursor()
+                                                for dt, cnt in _sacrifice_list.items():
+                                                    c2.execute('UPDATE user_dragons SET count = count - ? WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
+                                                               (cnt, _guild_id, _user_id, dt))
+                                                c2.execute('UPDATE dragon_nest SET level = ? WHERE guild_id = ? AND user_id = ?',
+                                                           (_new_level, _guild_id, _user_id))
+                                                c2.execute('DELETE FROM pending_perks WHERE guild_id = ? AND user_id = ?',
+                                                           (_guild_id, _user_id))
+                                                c2.execute('SELECT level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
+                                                           (_guild_id, _user_id))
+                                                current_level = c2.fetchone()[0]
+                                                from utils import generate_unique_perks
+                                                perk_store_level = current_level + 1 if current_level < 10 else 10
+                                                new_perks = generate_unique_perks(perk_store_level, 3, 0)
+                                                c2.execute('''INSERT OR REPLACE INTO pending_perks (guild_id, user_id, level, perks_json)
+                                                              VALUES (?, ?, ?, ?)''',
+                                                           (_guild_id, _user_id, perk_store_level, json.dumps({'selected_perks': new_perks})))
+                                                conn2.commit()
+                                                conn2.close()
+                                                if current_level == 10:
+                                                    from achievements import award_trophy
+                                                    await award_trophy(_bot, _guild_id, _user_id, 'nest_master')
+                                                await check_and_award_achievements(_guild_id, _user_id, bot=_bot)
+                                                self.stop()
+                                                if current_level < 10:
+                                                    await btn_inter.followup.send(
+                                                        f"✨ **Level {_new_level} Unlocked!**\n🎁 A new perk is waiting! Use `/dragonnest` to claim it.",
+                                                        ephemeral=False
+                                                    )
+                                                else:
+                                                    await btn_inter.followup.send(
+                                                        f"🏆 **Max Level Reached!**\nYou've reached the maximum Dragon Nest level!\n🎁 Your final perk is waiting! Use `/dragonnest` to claim it.",
+                                                        ephemeral=False
+                                                    )
+
+                                        await message.channel.send(embed=embed, view=_NestSacrificeView())
                                     else:
                                         # Max level
                                         c.execute('UPDATE dragon_nest SET bounties_active = NULL, speedrun_catches = 0 WHERE guild_id = ? AND user_id = ?',
@@ -1690,47 +1746,65 @@ class EventsCog(commands.Cog):
                             active_dragonscales[guild_id] += time_bonus * 60
 
                     # Send success message
-                    result_text = f"**Caught:** {final_amount}x {dragon_data['emoji']} {dragon_data['name']} Dragon"
-
-                    if perks_applied:
-                        result_text += f"\n({', '.join(perks_applied)})"
-
-                    result_text += "\n"
-
-                    if final_amount > 0:
-                        result_text += f"**Earned:** {int(coins_earned)} 🪙"
-
-                        if alpha_coin_bonus > 0:
-                            result_text += f"\n**Alpha Boost:** +{alpha_coin_bonus} 🪙"
-                    else:
-                        result_text += "**Lost all dragons!** 💀"
-
-                    if pack_rewards:
-                        result_text += f"\n**Bonus Packs:** {', '.join([PACK_TYPES[p]['emoji'] + ' ' + PACK_TYPES[p]['name'] for p in pack_rewards])}"
-
-                    if time_bonus > 0:
-                        result_text += f"\n**Time Bonus:** +{time_bonus} minutes to <:dragonscale:1446278170998341693>! ⏱️"
-
-                    alpha_effect_text = ""
-                    if alpha_effect_triggered:
-                        if alpha_multiplier > 1:
-                            alpha_effect_text = f"\n\n🌟 **Alpha Influence!**\n{alpha_owner_name}'s Alpha Dragon **{alpha_dragon_name}** blessed this catch!\n**x{alpha_multiplier} Multiplier Applied!**"
-                        elif dragonscale_event_minutes > 0:
-                            online_count = sum(1 for m in message.guild.members if not m.bot and m.status != discord.Status.offline)
-                            alpha_effect_text = f"\n\n<:dragonscale:1446278170998341693> **Dragonscale Event!**\n{alpha_owner_name}'s Alpha Dragon **{alpha_dragon_name}** triggered a dragonscale event!\n**+30 seconds** to all {online_count} online members!"
-
-                    night_vision_text = ""
-                    if guild_id in active_spawns:
-                        spawn_data = active_spawns[guild_id]
-                        if spawn_data.get('night_vision_activator'):
-                            night_vision_text = f"\n\n🌙 **Night Vision Triggered!**\nHigher rarity dragon found!"
+                    catch_secs = round(catch_time, 1)
 
                     embed = discord.Embed(
                         title=f"🎉 {message.author.display_name} caught the dragon!",
-                        description=result_text + alpha_effect_text + night_vision_text + item_boost_message,
+                        description=f"{final_amount}x {dragon_data['emoji']} **{dragon_data['name']} Dragon**",
                         color=discord.Color.gold()
                     )
+
+                    # Catch time + coins as inline fields
+                    embed.add_field(name="⏱️ Catch Time", value=f"{catch_secs}s", inline=True)
+
+                    if final_amount > 0:
+                        coins_value = f"{int(coins_earned)}"
+                        if alpha_coin_bonus > 0:
+                            coins_value += f"\n*(+{alpha_coin_bonus} from Alpha)*"
+                        embed.add_field(name="🪙 Earned", value=coins_value, inline=True)
+                    else:
+                        embed.add_field(name="💀 Result", value="Lost all dragons!", inline=True)
+
+                    # Bonus packs
+                    if pack_rewards:
+                        packs_text = ", ".join([PACK_TYPES[p]['emoji'] + " " + PACK_TYPES[p]['name'] for p in pack_rewards])
+                        embed.add_field(name="📦 Bonus Packs", value=packs_text, inline=False)
+
+                    # Dragonscale time bonus
+                    if time_bonus > 0:
+                        embed.add_field(name="<:dragonscale:1446278170998341693> Dragonscale", value=f"+{time_bonus} minutes", inline=True)
+
+                    # Active perks (only if any)
+                    if perks_applied:
+                        embed.add_field(name="✨ Active Perks", value=" • ".join(perks_applied), inline=False)
+
+                    # Alpha dragon influence
+                    if alpha_effect_triggered:
+                        if alpha_multiplier > 1:
+                            embed.add_field(
+                                name="🌟 Alpha Influence",
+                                value=f"{alpha_owner_name}'s **{alpha_dragon_name}** blessed this catch! (x{alpha_multiplier})",
+                                inline=False
+                            )
+                        elif dragonscale_event_minutes > 0:
+                            online_count = sum(1 for m in message.guild.members if not m.bot and m.status != discord.Status.offline)
+                            embed.add_field(
+                                name="<:dragonscale:1446278170998341693> Dragonscale Event",
+                                value=f"{alpha_owner_name}'s **{alpha_dragon_name}** triggered an event!\n+30 seconds for {online_count} online members",
+                                inline=False
+                            )
+
+                    # Night vision
+                    if guild_id in active_spawns and active_spawns[guild_id].get('night_vision_activator'):
+                        embed.add_field(name="🌙 Night Vision", value="Higher rarity dragon found!", inline=False)
+                    elif item_boost_message and "inactive" not in item_boost_message:
+                        embed.add_field(name="🌙 Night Vision", value="Higher rarity dragon found!", inline=False)
+
                     await message.channel.send(embed=embed)
+
+                    # Send quest notifications after catch embed
+                    for _qinfo in _pending_quest_notifications:
+                        await send_quest_notification(self.bot, guild_id, message.author.id, _qinfo)
 
                     # Instant respawn if dragonscale/dragonfest/premium is active
                     current_time = int(time.time())

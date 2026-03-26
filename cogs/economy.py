@@ -24,6 +24,18 @@ class EconomyCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
+    async def cog_load(self):
+        # Expire any pending coinflip bets that were left over from before restart
+        try:
+            conn = sqlite3.connect('dragon_bot.db', timeout=60.0)
+            c = conn.cursor()
+            c.execute("UPDATE coinflip_bets SET status = 'expired' WHERE status = 'pending' AND expires_at < ?",
+                      (int(time.time()),))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
     # ==================== BALANCE ====================
 
     @app_commands.command(name="bal", description="Check your balance")
@@ -864,6 +876,16 @@ class EconomyCog(commands.Cog):
                 self.challenger_id = challenger_id
                 self.opponent_id = opponent_id
                 self.amount = amount
+
+            async def on_timeout(self):
+                try:
+                    conn = sqlite3.connect('dragon_bot.db', timeout=60.0)
+                    c = conn.cursor()
+                    c.execute("UPDATE coinflip_bets SET status = 'expired' WHERE bet_id = ? AND status = 'pending'", (self.bet_id,))
+                    conn.commit()
+                    conn.close()
+                except Exception:
+                    pass
 
             @discord.ui.button(label="Accept", style=discord.ButtonStyle.green, emoji="✅")
             async def accept_button(self, interaction: discord.Interaction, button: discord.ui.Button):

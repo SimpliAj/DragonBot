@@ -49,6 +49,7 @@ class TasksCog(commands.Cog):
         self.process_breeding_queue.start()
         self.process_adventures.start()
         self.cleanup_stuck_sessions.start()
+        self.setup_reminder.start()
 
     def cog_unload(self):
         self.cleanup_locks_task.cancel()
@@ -1803,7 +1804,11 @@ class TasksCog(commands.Cog):
                 if coins_earned > 0:
                     reward_lines.append(f"💰 {coins_earned:,} coins")
                 if rewards_dragons:
-                    reward_lines.append(f"🐉 {', '.join(rewards_dragons)}")
+                    dragon_names = []
+                    for dt in rewards_dragons:
+                        d = DRAGON_TYPES.get(dt, {})
+                        dragon_names.append(f"{d.get('emoji', '🐉')} {d.get('name', dt)}")
+                    reward_lines.append('\n'.join(dragon_names))
                 if rewards_items:
                     reward_lines.append(f"📦 {', '.join(rewards_items)}")
 
@@ -1894,6 +1899,54 @@ class TasksCog(commands.Cog):
 
     @cleanup_stuck_sessions.before_loop
     async def before_cleanup_stuck_sessions(self):
+        await self.bot.wait_until_ready()
+
+    # ==================== SETUP REMINDER ====================
+    @tasks.loop(hours=24)
+    async def setup_reminder(self):
+        """DM guild owner/admins daily if the bot has not been configured (no spawn channel set)."""
+        for guild in self.bot.guilds:
+            channel_id = get_spawn_channel(guild.id)
+            if channel_id:
+                continue  # Already configured
+
+            embed = discord.Embed(
+                title="⚠️ Dragon Bot Not Configured",
+                description=(
+                    f"**Dragon Bot** is in your server **{guild.name}** but has not been set up yet.\n\n"
+                    "**Required Setup:**\n"
+                    "Use `/setchannel` in the channel where you want dragons to spawn.\n\n"
+                    "**Optional:**\n"
+                    "• `/setup` — view all configuration options\n"
+                    "• `/help` — see all available commands\n\n"
+                    "Dragons will not spawn until a spawn channel is set."
+                ),
+                color=discord.Color.orange()
+            )
+
+            # Try to DM owner first
+            recipients = set()
+            if guild.owner:
+                recipients.add(guild.owner)
+
+            # Also try admins who can manage the guild
+            try:
+                for member in guild.members:
+                    if member.guild_permissions.administrator and not member.bot:
+                        recipients.add(member)
+                    if len(recipients) >= 3:
+                        break
+            except Exception:
+                pass
+
+            for recipient in recipients:
+                try:
+                    await recipient.send(embed=embed)
+                except Exception:
+                    pass
+
+    @setup_reminder.before_loop
+    async def before_setup_reminder(self):
         await self.bot.wait_until_ready()
 
 

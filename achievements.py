@@ -102,6 +102,11 @@ async def send_quest_notification(bot: discord.Client, guild_id: int, user_id: i
                 'complete_bingo': f'Complete Bingo {amt}x',
                 'vote_topgg': f'Vote on Top.gg {amt}x',
                 'attack_raidboss': f'Attack Raid Boss {amt}x',
+                'catch_under_10s': f'Catch {amt} Dragon(s) within 10s',
+                'catch_odd_second': f'Catch {amt} Dragon(s) on odd second',
+                'catch_even_second': f'Catch {amt} Dragon(s) on even second',
+                'complete_trade': f'Complete a Trade',
+                'gift_dragon': f'Gift someone',
             }
             return labels.get(qt, qt)
 
@@ -133,7 +138,9 @@ async def send_quest_notification(bot: discord.Client, guild_id: int, user_id: i
 
         if level_delta > 0:
             desc_lines.append(f'\n🎁 **Level Up!** Dragonpass Level **{new_level}**')
-            if pack_type:
+            if new_level == 30:
+                desc_lines.append(f'<:dragonscale:1446278170998341693> Reward: **2 Minutes Dragonscale**')
+            elif pack_type:
                 desc_lines.append(f'📦 Reward: **{pack_type.capitalize()} Pack**')
         elif all_done and not level_delta:
             desc_lines.append('\n⏳ Next level requires all quests again after refresh.')

@@ -95,7 +95,7 @@ class BreedingCog(commands.Cog):
             embed = discord.Embed(
                 title="🧬 DNA Sample Required",
                 description="You need a **DNA Sample** to breed dragons!\n\n"
-                            "Get one in the `/shop` for 5,000🪙\n\n"
+                            "Get one in the `/shop` for 12,500🪙\n\n"
                             "**DNA Break Chances by Rarity:**\n"
                             "🟢 Common: 5% | 🔵 Uncommon: 10% | 🟣 Rare: 15%\n"
                             "🟠 Epic: 25% | 🟡 Legendary: 35% | 🌟 Mythic: 42% | ✨ Ultra: 50%",
@@ -270,11 +270,22 @@ class BreedingCog(commands.Cog):
                                 p2_data = DRAGON_TYPES[p2]
                                 chances_text = "\n".join([f"**{r.title()}:** {p}%" for r, p in chances.items()])
 
+                                breed_lvl_now = breeding_info['level']
+                                if breed_lvl_now >= 15:
+                                    loss_pct = 10
+                                elif breed_lvl_now >= 10:
+                                    loss_pct = 20
+                                elif breed_lvl_now >= 5:
+                                    loss_pct = 35
+                                else:
+                                    loss_pct = 50
+
                                 confirm_embed = discord.Embed(
                                     title="🧬 Confirm Cross-Breeding",
                                     description=f"**Parent 1:** {p1_data['emoji']} {p1_data['name']} ({r1})\n"
                                                f"**Parent 2:** {p2_data['emoji']} {p2_data['name']} ({r2})\n\n"
-                                               f"**Cost:** 1,000🪙\n**Parents:** Both stay in your inventory\n\n"
+                                               f"**Cost:** 1,000🪙\n"
+                                               f"⚠️ On fail: {loss_pct}% chance to lose a parent (Breeding Lvl {breed_lvl_now})\n\n"
                                                f"**Offspring Chances:**\n{chances_text}",
                                     color=0xFFD700
                                 )
@@ -350,13 +361,26 @@ class BreedingCog(commands.Cog):
                                                           (inter4.guild_id, inter4.user.id, int(time.time()), hr, int(time.time()), hr))
 
                                                 if result_rarity == 'fail':
-                                                    consumed = random.choice([p1, p2])
-                                                    c.execute('UPDATE user_dragons SET count = count - 1 WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
-                                                              (inter4.guild_id, inter4.user.id, consumed))
+                                                    # Level-based parent protection
+                                                    breed_lvl = get_breeding_level_info(inter4.guild_id, inter4.user.id)['level']
+                                                    if breed_lvl >= 15:
+                                                        loss_chance = 10
+                                                    elif breed_lvl >= 10:
+                                                        loss_chance = 20
+                                                    elif breed_lvl >= 5:
+                                                        loss_chance = 35
+                                                    else:
+                                                        loss_chance = 50
+
+                                                    consumed = None
+                                                    if random.randint(1, 100) <= loss_chance:
+                                                        consumed = random.choice([p1, p2])
+                                                        c.execute('UPDATE user_dragons SET count = count - 1 WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
+                                                                  (inter4.guild_id, inter4.user.id, consumed))
                                                     xp_result = add_breeding_xp(inter4.guild_id, inter4.user.id, BREEDING_XP_GAINS['fail'], cursor=c, conn=conn)
                                                     conn.commit()
                                                     conn.close()
-                                                    return {'status': 'failed', 'roll': roll, 'consumed': consumed, 'dna': dna_break, 'new_level': xp_result.get('new_level') if xp_result else None}
+                                                    return {'status': 'failed', 'consumed': consumed, 'dna': dna_break, 'new_level': xp_result.get('new_level') if xp_result else None}
 
                                                 # Success
                                                 offspring = random.choice(DRAGON_RARITY_TIERS[result_rarity])
@@ -381,16 +405,18 @@ class BreedingCog(commands.Cog):
                                             return
 
                                         if result['status'] == 'failed':
-                                            consumed_data = DRAGON_TYPES[result['consumed']]
+                                            if result['consumed']:
+                                                consumed_data = DRAGON_TYPES[result['consumed']]
+                                                loss_line = f"**Lost:** {consumed_data['emoji']} {consumed_data['name']}"
+                                            else:
+                                                loss_line = "✅ Your dragons were protected — no parent lost!"
                                             result_embed = discord.Embed(
                                                 title="💔 Breeding Failed!",
                                                 description=f"**Parents:**\n"
                                                            f"{p1_data['emoji']} {p1_data['name']} + "
                                                            f"{p2_data['emoji']} {p2_data['name']}\n\n"
-                                                           f"⚠️ The breeding experiment failed!\n"
-                                                           f"One dragon was consumed...\n\n"
-                                                           f"**Lost:** {consumed_data['emoji']} {consumed_data['name']}\n\n"
-                                                           f"🎲 Rolled: {result['roll']}/100\n"
+                                                           f"⚠️ The breeding experiment failed!\n\n"
+                                                           f"{loss_line}\n\n"
                                                            f"⏰ Cooldown: Initiated",
                                                 color=discord.Color.red()
                                             )
@@ -419,7 +445,6 @@ class BreedingCog(commands.Cog):
                                                        f"✅ Parents remain in your inventory!\n"
                                                        f"**Cost:** 1,000🪙\n"
                                                        f"🧬 DNA: {'✅ Survived' if not result['dna'] else '❌ Destroyed'}\n\n"
-                                                       f"🎲 Rolled: {result['roll']}/100\n"
                                                        f"⏰ Cooldown: {cd_h}h {cd_m}m ({result['hr'].title()} tier)",
                                             color=discord.Color.gold()
                                         )
@@ -431,13 +456,13 @@ class BreedingCog(commands.Cog):
 
                                     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
                                     async def cancel(self, inter4: discord.Interaction, button: discord.ui.Button):
-                                        await inter4.response.followup.send(content="❌ Cancelled", ephemeral=False)
+                                        await inter4.response.send_message(content="❌ Breeding cancelled.", ephemeral=False)
                                         if session_key in active_breeding_sessions:
                                             del active_breeding_sessions[session_key]
 
-                                await inter3.response.followup.send(embed=confirm_embed, view=ConfirmView())
+                                await inter3.followup.send(embed=confirm_embed, view=ConfirmView())
 
-                        await inter2.response.followup.send(content="Now select the second parent:", view=Parent2View())
+                        await inter2.followup.send(content="Now select the second parent:", view=Parent2View())
 
                 await inter.followup.send("Select the first parent dragon:", view=Parent1View(), ephemeral=False)
 

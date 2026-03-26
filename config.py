@@ -462,7 +462,7 @@ MYSTERY_BOX_POOL = [
     {'type': 'item',       'item_type': 'dice_of_fate',       'weight':  8, 'emoji': '🎲', 'label': 'Dice of Fate'},
     {'type': 'pack',       'pack_type': 'pack_wooden',        'weight': 14, 'emoji': '<:woodenchest:1446170002708238476>', 'label': 'Wooden Pack'},
     {'type': 'pack',       'pack_type': 'pack_stone',         'weight':  8, 'emoji': '<:stonechest:1446169958265389247>', 'label': 'Stone Pack'},
-    {'type': 'dragonscale','minutes':   (5, 15),              'weight': 12, 'emoji': '🟪', 'label': '{minutes}min Dragonscale'},
+    {'type': 'dragonscale','minutes':   (2, 5),              'weight': 12, 'emoji': '🟪', 'label': '{minutes}min Dragonscale'},
     {'type': 'item',       'item_type': 'lucky_dice',         'weight':  5, 'emoji': '🎰', 'label': 'Lucky Dice'},
     {'type': 'item',       'item_type': 'night_vision',       'weight':  3, 'emoji': '🌙', 'label': 'Night Vision'},
 ]

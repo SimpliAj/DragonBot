@@ -263,10 +263,10 @@ def generate_dragonpass_quests(current_time: int, guild_id: int = None, user_id:
         try:
             conn = sqlite3.connect(DB_PATH, timeout=120.0)
             c = conn.cursor()
-            c.execute('SELECT cooldown_expires FROM bingo WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
+            c.execute('SELECT completed, expires_at FROM bingo_cards WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
             bingo_result = c.fetchone()
             conn.close()
-            if bingo_result and bingo_result[0] and bingo_result[0] > current_time:
+            if bingo_result and bingo_result[0] == 1 and bingo_result[1] and bingo_result[1] > current_time:
                 has_bingo_cooldown = True
         except Exception:
             pass
@@ -329,20 +329,20 @@ def generate_dragonpass_quests(current_time: int, guild_id: int = None, user_id:
         {'type': 'use_coinflip', 'amount': 1, 'reward': 50},
         {'type': 'use_coinflip', 'amount': 3, 'reward': 100},
         {'type': 'use_coinflip', 'amount': 5, 'reward': 150},
+        {'type': 'complete_trade', 'amount': 1, 'reward': 150},
+        {'type': 'gift_dragon', 'amount': 1, 'reward': 100},
+        {'type': 'catch_under_10s', 'amount': 1, 'reward': 100},
+        {'type': 'catch_odd_second', 'amount': 1, 'reward': 75},
+        {'type': 'catch_even_second', 'amount': 1, 'reward': 75},
     ])
 
     if not has_bingo_cooldown:
         quest_types.extend([
-            {'type': 'check_bingo', 'amount': 1, 'reward': 75},
             {'type': 'complete_bingo', 'amount': 1, 'reward': 300},
         ])
 
     selected_quests = []
     seen_types = set()
-
-    if ENABLE_TOPGG_VOTE_QUEST:
-        selected_quests = [{'type': 'vote_topgg', 'amount': 1, 'reward': 100}]
-        seen_types.add('vote_topgg')
 
     quest_types_copy = quest_types.copy()
     random.shuffle(quest_types_copy)
@@ -352,21 +352,18 @@ def generate_dragonpass_quests(current_time: int, guild_id: int = None, user_id:
             break
 
         quest_type = quest['type']
-        amount = quest['amount']
 
-        if quest_type == 'catch_rarity_or_higher':
-            type_key = (quest_type, quest.get('dragon_name', ''), amount)
-        else:
-            type_key = (quest_type, amount)
-
-        if type_key not in seen_types:
+        if quest_type not in seen_types:
             selected_quests.append(quest)
-            seen_types.add(type_key)
+            seen_types.add(quest_type)
+
+    # 4th quest: always vote on top.gg
+    selected_quests.append({'type': 'vote_topgg', 'amount': 1, 'reward': 100})
 
     return selected_quests
 
 
-def check_dragonpass_quests(guild_id: int, user_id: int, action_type: str, amount: int = 1, dragon_type: str = None):
+def check_dragonpass_quests(guild_id: int, user_id: int, action_type: str, amount: int = 1, dragon_type: str = None, catch_time: float = None):
     """Check and update Dragonpass quest progress."""
     lock = get_quest_lock(guild_id, user_id)
 
@@ -402,7 +399,8 @@ def check_dragonpass_quests(guild_id: int, user_id: int, action_type: str, amoun
                     needs_quest_regen = True
                 else:
                     quests = ast.literal_eval(quests_active)
-                    if len(quests) < 3:
+                    has_vote = any(q.get('type') == 'vote_topgg' for q in quests)
+                    if len(quests) < 4 or not has_vote:
                         quests = generate_dragonpass_quests(current_time, guild_id, user_id)
                         quest_refresh_time = current_time + 43200
                         needs_quest_regen = True
@@ -427,8 +425,7 @@ def check_dragonpass_quests(guild_id: int, user_id: int, action_type: str, amoun
                 c.execute('UPDATE dragonpass SET quests_active = ?, quest_refresh_time = ? WHERE guild_id = ? AND user_id = ?',
                           (str(quests), quest_refresh_time, guild_id, user_id))
                 conn.commit()
-                conn.close()
-                return 0, 0, [], None
+                # Continue processing the action against the fresh quests instead of discarding it
 
             newly_completed = []
             for quest in quests:
@@ -458,6 +455,19 @@ def check_dragonpass_quests(guild_id: int, user_id: int, action_type: str, amoun
                     current_progress += amount
                 elif action_type == 'complete_bingo' and quest_type == 'complete_bingo':
                     current_progress += amount
+                elif action_type == 'complete_trade' and quest_type == 'complete_trade':
+                    current_progress += amount
+                elif action_type == 'gift_dragon' and quest_type == 'gift_dragon':
+                    current_progress += amount
+                elif action_type == 'catch_dragon' and quest_type == 'catch_under_10s':
+                    if catch_time is not None and catch_time < 10:
+                        current_progress += 1
+                elif action_type == 'catch_dragon' and quest_type == 'catch_odd_second':
+                    if int(time.time()) % 2 == 1:
+                        current_progress += 1
+                elif action_type == 'catch_dragon' and quest_type == 'catch_even_second':
+                    if int(time.time()) % 2 == 0:
+                        current_progress += 1
 
                 if current_progress >= target_amount and quest.get('completed') is not True:
                     coins_gained += reward
@@ -475,7 +485,7 @@ def check_dragonpass_quests(guild_id: int, user_id: int, action_type: str, amoun
             new_level = current_level
             pack_type = None
 
-            if completed_count >= 3 and coins_gained > 0 and new_level < 30:
+            if completed_count >= 4 and coins_gained > 0 and new_level < 30:
                 new_level += 1
 
                 if new_level not in claimed_levels:
@@ -496,11 +506,10 @@ def check_dragonpass_quests(guild_id: int, user_id: int, action_type: str, amoun
                               (guild_id, user_id, pack_type))
 
                 if new_level == 30:
-                    c.execute('''INSERT INTO user_items (guild_id, user_id, item_type, count)
-                                 VALUES (?, ?, ?, 2)
-                                 ON CONFLICT(guild_id, user_id, item_type)
-                                 DO UPDATE SET count = count + 2''',
-                              (guild_id, user_id, 'dragonscale'))
+                    c.execute('''INSERT INTO dragonscales (guild_id, user_id, minutes)
+                                 VALUES (?, ?, 2)
+                                 ON CONFLICT(guild_id, user_id) DO UPDATE SET minutes = minutes + 2''',
+                              (guild_id, user_id))
 
             c.execute('UPDATE dragonpass SET quests_active = ?, level = ?, claimed_levels = ?, quest_refresh_time = ? WHERE guild_id = ? AND user_id = ?',
                       (str(updated_quests), new_level, str(claimed_levels), quest_refresh_time, guild_id, user_id))
@@ -523,8 +532,13 @@ def check_dragonpass_quests(guild_id: int, user_id: int, action_type: str, amoun
             } if newly_completed else None
             return coins_gained, new_level - current_level, trophies_to_award, quest_info
 
-        except sqlite3.OperationalError as e:
-            logger.error(f"Database error in check_dragonpass_quests for user {user_id} in guild {guild_id}: {e}")
+        except Exception as e:
+            logger.error(f"Error in check_dragonpass_quests for user {user_id} in guild {guild_id}: {e}", exc_info=True)
+            print(f"[check_dragonpass_quests] ERROR user={user_id} guild={guild_id} action={action_type}: {e}")
+            try:
+                conn.close()
+            except Exception:
+                pass
             return None
 
 
