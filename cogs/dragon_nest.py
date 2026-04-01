@@ -377,44 +377,44 @@ class DragonNestCog(commands.Cog):
 
                         await btn_interaction.response.defer()
 
-                        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
-                        c = conn.cursor()
+                        guild_id = self.guild_id
+                        user_id = self.user_id
+                        sacrifice_list = self.sacrifice_list
+                        level = self.level
 
-                        # Remove dragons and level up
-                        for dragon_type, count in self.sacrifice_list.items():
-                            c.execute('UPDATE user_dragons SET count = count - ? WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
-                                      (count, self.guild_id, self.user_id, dragon_type))
+                        def do_db_work():
+                            conn = sqlite3.connect('dragon_bot.db', timeout=30.0)
+                            c = conn.cursor()
+                            for dragon_type, count in sacrifice_list.items():
+                                c.execute('UPDATE user_dragons SET count = count - ? WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
+                                          (count, guild_id, user_id, dragon_type))
+                            c.execute('UPDATE dragon_nest SET level = ? WHERE guild_id = ? AND user_id = ?',
+                                      (level, guild_id, user_id))
+                            c.execute('DELETE FROM pending_perks WHERE guild_id = ? AND user_id = ?',
+                                      (guild_id, user_id))
+                            c.execute('SELECT level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
+                                      (guild_id, user_id))
+                            current_level = c.fetchone()[0]
+                            conn.commit()
+                            conn.close()
 
-                        # Update level
-                        c.execute('UPDATE dragon_nest SET level = ? WHERE guild_id = ? AND user_id = ?',
-                                  (self.level, self.guild_id, self.user_id))
+                            perk_store_level = current_level + 1 if current_level < 10 else 10
+                            new_selected_perks = generate_unique_perks(perk_store_level, 3, 0)
+                            conn2 = sqlite3.connect('dragon_bot.db', timeout=30.0)
+                            c2 = conn2.cursor()
+                            c2.execute('''INSERT OR REPLACE INTO pending_perks (guild_id, user_id, level, perks_json)
+                                         VALUES (?, ?, ?, ?)''',
+                                      (guild_id, user_id, perk_store_level, json.dumps({'selected_perks': new_selected_perks})))
+                            conn2.commit()
+                            conn2.close()
+                            return current_level
 
-                        # Delete pending perks entry
-                        c.execute('DELETE FROM pending_perks WHERE guild_id = ? AND user_id = ?',
-                                  (self.guild_id, self.user_id))
-
-                        # Check if player reached max level (10)
-                        c.execute('SELECT level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
-                                  (self.guild_id, self.user_id))
-                        current_level = c.fetchone()[0]
-
-                        conn.commit()
-                        conn.close()
+                        current_level = await asyncio.to_thread(do_db_work)
 
                         if current_level == 10:
                             await award_trophy(btn_interaction.client, self.guild_id, self.user_id, 'nest_master')
 
                         await check_and_award_achievements(self.guild_id, self.user_id, bot=btn_interaction.client)
-
-                        perk_store_level = current_level + 1 if current_level < 10 else 10
-                        new_selected_perks = generate_unique_perks(perk_store_level, 3, 0)
-                        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
-                        c = conn.cursor()
-                        c.execute('''INSERT OR REPLACE INTO pending_perks (guild_id, user_id, level, perks_json)
-                                     VALUES (?, ?, ?, ?)''',
-                                  (self.guild_id, self.user_id, perk_store_level, json.dumps({'selected_perks': new_selected_perks})))
-                        conn.commit()
-                        conn.close()
 
                         if current_level < 10:
                             await btn_interaction.followup.send(

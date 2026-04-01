@@ -1532,14 +1532,11 @@ class EventsCog(commands.Cog):
                                 nest_level = nest_result[2]
 
                                 bounties_completed = 0
+                                _rarity_order = {'common': 0, 'uncommon': 1, 'rare': 2, 'epic': 3, 'legendary': 4, 'mythic': 5, 'ultra': 6}
                                 dragon_rarity_level = 0
-                                for idx, dragon_key_check in enumerate(DRAGON_TYPES.keys()):
-                                    if dragon_key_check == dragon_key:
-                                        if idx >= 5: dragon_rarity_level = 1
-                                        if idx >= 9: dragon_rarity_level = 2
-                                        if idx >= 14: dragon_rarity_level = 3
-                                        if idx >= 18: dragon_rarity_level = 4
-                                        if idx >= 20: dragon_rarity_level = 5
+                                for _rarity, _dragons in DRAGON_RARITY_TIERS.items():
+                                    if dragon_key in _dragons:
+                                        dragon_rarity_level = _rarity_order.get(_rarity, 0)
                                         break
 
                                 for bounty in bounties:

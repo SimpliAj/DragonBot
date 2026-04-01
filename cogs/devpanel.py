@@ -33,6 +33,19 @@ _MINUTES_OPTIONS = [
     discord.SelectOption(label="12 hours",    value="720"),
     discord.SelectOption(label="24 hours",    value="1440"),
 ]
+_STATUS_OPTIONS = [
+    discord.SelectOption(label="🟢 Online",          value="online"),
+    discord.SelectOption(label="🟡 Idle",             value="idle"),
+    discord.SelectOption(label="🔴 Do Not Disturb",   value="dnd"),
+    discord.SelectOption(label="⚫ Invisible",         value="invisible"),
+]
+_ACTIVITY_OPTIONS = [
+    discord.SelectOption(label="❌ No Activity",   value="none"),
+    discord.SelectOption(label="🎮 Playing",       value="playing"),
+    discord.SelectOption(label="👀 Watching",      value="watching"),
+    discord.SelectOption(label="🎵 Listening",     value="listening"),
+    discord.SelectOption(label="📡 Streaming",     value="streaming"),
+]
 
 
 # ── Fake message adapter so we can reuse handle_dev_command ─────────────────
@@ -245,6 +258,29 @@ class FixSoftlockModal(discord.ui.Modal, title="Fix Softlock"):
             await _run(interaction, self.bot, 'fix-softlock', [], mentions=[user])
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
+
+class SetStatusModal(discord.ui.Modal, title="Set Bot Status"):
+    activity_text = discord.ui.TextInput(
+        label="Activity Text",
+        placeholder="e.g. Dragon Bot",
+        required=False,
+    )
+
+    def __init__(self, bot, status_value: discord.Status, activity_type):
+        super().__init__()
+        self.bot = bot
+        self.status_value = status_value
+        self.activity_type = activity_type
+
+    async def on_submit(self, interaction: discord.Interaction):
+        text = self.activity_text.value.strip()
+        if self.activity_type is None or not text:
+            activity = None
+        else:
+            activity = discord.Activity(type=self.activity_type, name=text)
+        await self.bot.change_presence(status=self.status_value, activity=activity)
+        await interaction.response.send_message("✅ Status updated!", ephemeral=True)
 
 
 # ── Give Sub-Views ─────────────────────────────────────────────────────────────
@@ -585,6 +621,57 @@ class DangerView(discord.ui.View):
         await i.response.edit_message(embed=_main_embed(), view=DevPanelView(self.bot))
 
 
+_STATUS_VALUE_MAP = {
+    "online":    discord.Status.online,
+    "idle":      discord.Status.idle,
+    "dnd":       discord.Status.dnd,
+    "invisible": discord.Status.invisible,
+}
+_ACTIVITY_VALUE_MAP = {
+    "none":      None,
+    "playing":   discord.ActivityType.playing,
+    "watching":  discord.ActivityType.watching,
+    "listening": discord.ActivityType.listening,
+    "streaming": discord.ActivityType.streaming,
+}
+
+
+class StatusView(discord.ui.View):
+    def __init__(self, bot):
+        super().__init__(timeout=120)
+        self.bot = bot
+        self.selected_status = discord.Status.online
+        self.selected_activity = None
+
+    @discord.ui.select(
+        placeholder="Status…",
+        options=_STATUS_OPTIONS,
+        row=0,
+    )
+    async def status_select(self, interaction: discord.Interaction, select: discord.ui.Select):
+        self.selected_status = _STATUS_VALUE_MAP[select.values[0]]
+        await interaction.response.defer()
+
+    @discord.ui.select(
+        placeholder="Activity type…",
+        options=_ACTIVITY_OPTIONS,
+        row=1,
+    )
+    async def activity_select(self, interaction: discord.Interaction, select: discord.ui.Select):
+        self.selected_activity = _ACTIVITY_VALUE_MAP[select.values[0]]
+        await interaction.response.defer()
+
+    @discord.ui.button(label="Set Status", emoji="🤖", style=discord.ButtonStyle.primary, row=2)
+    async def set_status(self, interaction: discord.Interaction, _):
+        await interaction.response.send_modal(
+            SetStatusModal(self.bot, self.selected_status, self.selected_activity)
+        )
+
+    @discord.ui.button(label="← Back", style=discord.ButtonStyle.gray, row=2)
+    async def back(self, interaction: discord.Interaction, _):
+        await interaction.response.edit_message(embed=_main_embed(), view=DevPanelView(self.bot))
+
+
 # ── Main Panel ────────────────────────────────────────────────────────────────
 
 def _main_embed() -> discord.Embed:
@@ -598,6 +685,7 @@ def _main_embed() -> discord.Embed:
     embed.add_field(name="⚔️ Spawn",   value="Raid boss, black market, dragonfest, raid kill", inline=False)
     embed.add_field(name="📊 Info",    value="Spawn status, DB status, raid info, softlocks, nest level", inline=False)
     embed.add_field(name="⚠️ Danger",  value="Clear events, wipe server, restart", inline=False)
+    embed.add_field(name="🤖 Status",  value="Online/idle/dnd/invisible, activity text", inline=False)
     return embed
 
 
@@ -633,6 +721,12 @@ class DevPanelView(discord.ui.View):
         await i.response.edit_message(
             embed=discord.Embed(title="⚠️ Danger Zone", color=discord.Color.dark_red()),
             view=DangerView(self.bot))
+
+    @discord.ui.button(label="🤖 Status", style=discord.ButtonStyle.secondary, row=1)
+    async def status(self, i, _):
+        await i.response.edit_message(
+            embed=discord.Embed(title="🤖 Bot Status", color=discord.Color.blurple()),
+            view=StatusView(self.bot))
 
 
 # ── Cog ────────────────────────────────────────────────────────────────────────

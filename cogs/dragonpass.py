@@ -6,6 +6,7 @@ import ast
 import time
 from config import DRAGON_TYPES
 from utils import generate_dragonpass_quests
+from achievements import send_quest_notification
 
 
 class DragonpassCog(commands.Cog):
@@ -87,6 +88,17 @@ class DragonpassCog(commands.Cog):
             conn2.commit()
             conn2.close()
             level = new_level
+
+            # Send level-up notification
+            quest_info = {
+                'newly_completed': quests_check,
+                'remaining': [],
+                'level_delta': 1,
+                'pack_type': pack_type,
+                'new_level': new_level,
+                'coins': 0,
+            }
+            await send_quest_notification(self.bot, interaction.guild_id, interaction.user.id, quest_info)
 
         quests = ast.literal_eval(quests_active) if quests_active else []
         completed_count = sum(1 for q in quests if q.get('completed', False))
@@ -207,7 +219,10 @@ class DragonpassCog(commands.Cog):
             reward_visual = ""
             for lvl in range(start_lvl, end_lvl + 1):
                 if lvl == 30:
-                    reward_visual += '<:dragonscale:1446278170998341693>'
+                    if lvl in claimed_levels:
+                        reward_visual += '✅'
+                    else:
+                        reward_visual += '<:dragonscale:1446278170998341693>'
                 else:
                     if lvl <= 10:
                         pack_type = 'stone' if lvl % 2 == 0 else 'wooden'

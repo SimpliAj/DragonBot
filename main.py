@@ -31,6 +31,7 @@ async def main():
             'cogs.admin',
             'cogs.topgg',
             'cogs.devpanel',
+            'cogs.adminpanel',
             'cogs.economy',
             'cogs.dragons',
             'cogs.dragon_nest',
