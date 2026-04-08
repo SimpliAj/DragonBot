@@ -3,6 +3,7 @@ cogs/devpanel.py - /devpanel slash command (DEV_USER_ID only).
 Replaces all -db prefix commands with an interactive panel.
 """
 
+import os
 import sqlite3
 import time
 
@@ -616,6 +617,17 @@ class DangerView(discord.ui.View):
         await i.response.defer(ephemeral=True)
         await _run(i, self.bot, 'restart', [])
 
+    @discord.ui.button(label="Backup DB", emoji="💾", style=discord.ButtonStyle.secondary, row=1)
+    async def backup_db_btn(self, i: discord.Interaction, _):
+        await i.response.defer(ephemeral=True)
+        try:
+            from cogs.backup import backup_db
+            path = await backup_db()
+            filename = os.path.basename(path)
+            await i.followup.send(f'✅ Backup saved: `{filename}`', ephemeral=True)
+        except Exception as e:
+            await i.followup.send(f'❌ Backup failed: {e}', ephemeral=True)
+
     @discord.ui.button(label="← Back", style=discord.ButtonStyle.gray, row=1)
     async def back(self, i, _):
         await i.response.edit_message(embed=_main_embed(), view=DevPanelView(self.bot))
@@ -684,7 +696,7 @@ def _main_embed() -> discord.Embed:
     embed.add_field(name="🔄 Reset",   value="Perks, inventory, battlepass, bingo, breeding, quests", inline=False)
     embed.add_field(name="⚔️ Spawn",   value="Raid boss, black market, dragonfest, raid kill", inline=False)
     embed.add_field(name="📊 Info",    value="Spawn status, DB status, raid info, softlocks, nest level", inline=False)
-    embed.add_field(name="⚠️ Danger",  value="Clear events, wipe server, restart", inline=False)
+    embed.add_field(name="⚠️ Danger",  value="Clear events, wipe server, restart, backup DB", inline=False)
     embed.add_field(name="🤖 Status",  value="Online/idle/dnd/invisible, activity text", inline=False)
     return embed
 

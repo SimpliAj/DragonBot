@@ -27,6 +27,7 @@ async def main():
         init_db()
         extensions = [
             'cogs.tasks',
+            'cogs.backup',
             'cogs.events',
             'cogs.admin',
             'cogs.topgg',
