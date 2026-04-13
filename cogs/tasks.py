@@ -29,6 +29,7 @@ from state import (
 from utils import (
     get_breeding_cost, get_dragon_rarity, get_spawn_channel,
     get_spawn_channel as _get_spawn_channel,
+    get_setup_reminder_ignored_until, set_setup_reminder_ignored_until,
 )
 
 import logging
@@ -1905,10 +1906,15 @@ class TasksCog(commands.Cog):
     @tasks.loop(hours=24)
     async def setup_reminder(self):
         """DM guild owner/admins daily if the bot has not been configured (no spawn channel set)."""
+        current_time = int(time.time())
+
         for guild in self.bot.guilds:
-            channel_id = get_spawn_channel(guild.id)
-            if channel_id:
+            if get_spawn_channel(guild.id):
                 continue  # Already configured
+
+            ignored_until = get_setup_reminder_ignored_until(guild.id)
+            if ignored_until and current_time < ignored_until:
+                continue  # User snoozed reminders
 
             embed = discord.Embed(
                 title="⚠️ Dragon Bot Not Configured",
@@ -1923,6 +1929,20 @@ class TasksCog(commands.Cog):
                 ),
                 color=discord.Color.orange()
             )
+
+            guild_id = guild.id
+
+            class IgnoreReminderView(discord.ui.View):
+                def __init__(self_inner):
+                    super().__init__(timeout=None)
+
+                @discord.ui.button(label="Ignore for 7 days", style=discord.ButtonStyle.secondary, emoji="🔕")
+                async def ignore_button(self_inner, interaction: discord.Interaction, button: discord.ui.Button):
+                    until = int(time.time()) + 7 * 24 * 3600
+                    set_setup_reminder_ignored_until(guild_id, until)
+                    button.disabled = True
+                    button.label = "Reminder paused for 7 days"
+                    await interaction.response.edit_message(view=self_inner)
 
             # Try to DM owner first
             recipients = set()
@@ -1941,7 +1961,7 @@ class TasksCog(commands.Cog):
 
             for recipient in recipients:
                 try:
-                    await recipient.send(embed=embed)
+                    await recipient.send(embed=embed, view=IgnoreReminderView())
                 except Exception:
                     pass
 

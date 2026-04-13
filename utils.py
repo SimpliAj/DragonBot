@@ -733,6 +733,36 @@ def set_spawn_channel(guild_id: int, channel_id: int):
     conn.close()
 
 
+# ==================== SETUP REMINDER IGNORE ====================
+def get_setup_reminder_ignored_until(guild_id: int) -> int:
+    """Return Unix timestamp until which the setup reminder is ignored for this guild (0 = not ignored)."""
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=120.0)
+        c = conn.cursor()
+        c.execute('SELECT setup_reminder_ignored_until FROM guild_settings WHERE guild_id = ?', (guild_id,))
+        result = c.fetchone()
+        conn.close()
+        return result[0] if result and result[0] else 0
+    except sqlite3.OperationalError:
+        return 0
+
+
+def set_setup_reminder_ignored_until(guild_id: int, until: int):
+    """Store Unix timestamp until which setup reminder is suppressed for this guild."""
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=120.0)
+        c = conn.cursor()
+        c.execute(
+            'INSERT INTO guild_settings (guild_id, setup_reminder_ignored_until) VALUES (?, ?) '
+            'ON CONFLICT(guild_id) DO UPDATE SET setup_reminder_ignored_until = excluded.setup_reminder_ignored_until',
+            (guild_id, until)
+        )
+        conn.commit()
+        conn.close()
+    except sqlite3.OperationalError as e:
+        logger.warning(f"Failed to set setup_reminder_ignored_until: {e}")
+
+
 # ==================== RAID BOSS ====================
 def is_raid_boss_active(guild_id: int) -> bool:
     """Check if raid boss is currently active in guild."""

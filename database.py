@@ -523,6 +523,13 @@ def init_db():
         UNIQUE(guild_id, user_id, adventure_type)
     )''')
 
+    # Migrate guild_settings: add setup_reminder_ignored_until if missing
+    c.execute("PRAGMA table_info(guild_settings)")
+    gs_columns = [col[1] for col in c.fetchall()]
+    if 'setup_reminder_ignored_until' not in gs_columns:
+        c.execute('ALTER TABLE guild_settings ADD COLUMN setup_reminder_ignored_until INTEGER DEFAULT 0')
+        conn.commit()
+
     # Migrate user_adventures: add double_loot column if missing
     c.execute("PRAGMA table_info(user_adventures)")
     adv_columns = [col[1] for col in c.fetchall()]
