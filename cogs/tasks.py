@@ -36,6 +36,37 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+class IgnoreReminderView(discord.ui.View):
+    """Persistent view for the setup reminder ignore button. Survives bot restarts via custom_id."""
+
+    def __init__(self, guild_id: int):
+        super().__init__(timeout=None)
+        self.guild_id = guild_id
+        btn = discord.ui.Button(
+            label="Ignore for 7 days",
+            style=discord.ButtonStyle.secondary,
+            emoji="🔕",
+            custom_id=f"ignore_reminder_{guild_id}",
+        )
+        btn.callback = self._callback
+        self.add_item(btn)
+
+    async def _callback(self, interaction: discord.Interaction):
+        guild_id = int(interaction.data["custom_id"].split("_")[-1])
+        until = int(time.time()) + 7 * 24 * 3600
+        set_setup_reminder_ignored_until(guild_id, until)
+        # Rebuild view with disabled button
+        new_view = discord.ui.View()
+        new_btn = discord.ui.Button(
+            label="Reminder paused for 7 days",
+            style=discord.ButtonStyle.secondary,
+            emoji="🔕",
+            disabled=True,
+        )
+        new_view.add_item(new_btn)
+        await interaction.response.edit_message(view=new_view)
+
+
 class TasksCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -51,6 +82,19 @@ class TasksCog(commands.Cog):
         self.process_adventures.start()
         self.cleanup_stuck_sessions.start()
         self.setup_reminder.start()
+
+    async def cog_load(self):
+        """Re-register persistent ignore-reminder views for all unconfigured guilds after restart."""
+        from database import get_db_connection
+        conn = get_db_connection()
+        try:
+            c = conn.cursor()
+            c.execute('SELECT guild_id FROM guild_settings WHERE spawn_channel IS NULL OR spawn_channel = 0')
+            rows = c.fetchall()
+        finally:
+            conn.close()
+        for (guild_id,) in rows:
+            self.bot.add_view(IgnoreReminderView(guild_id))
 
     def cog_unload(self):
         self.cleanup_locks_task.cancel()
@@ -1931,18 +1975,8 @@ class TasksCog(commands.Cog):
             )
 
             guild_id = guild.id
-
-            class IgnoreReminderView(discord.ui.View):
-                def __init__(self_inner):
-                    super().__init__(timeout=None)
-
-                @discord.ui.button(label="Ignore for 7 days", style=discord.ButtonStyle.secondary, emoji="🔕")
-                async def ignore_button(self_inner, interaction: discord.Interaction, button: discord.ui.Button):
-                    until = int(time.time()) + 7 * 24 * 3600
-                    set_setup_reminder_ignored_until(guild_id, until)
-                    button.disabled = True
-                    button.label = "Reminder paused for 7 days"
-                    await interaction.response.edit_message(view=self_inner)
+            view = IgnoreReminderView(guild_id)
+            self.bot.add_view(view)  # Register so it survives future restarts
 
             # Try to DM owner first
             recipients = set()
@@ -1961,7 +1995,7 @@ class TasksCog(commands.Cog):
 
             for recipient in recipients:
                 try:
-                    await recipient.send(embed=embed, view=IgnoreReminderView())
+                    await recipient.send(embed=embed, view=view)
                 except Exception:
                     pass
 
