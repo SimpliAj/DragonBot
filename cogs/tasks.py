@@ -4,10 +4,12 @@ Extracted verbatim from bot.py.
 """
 
 import asyncio
+import datetime
 import json
 import random
 import sqlite3
 import time
+from zoneinfo import ZoneInfo
 
 import discord
 from discord.ext import commands, tasks
@@ -82,6 +84,8 @@ class TasksCog(commands.Cog):
         self.process_adventures.start()
         self.cleanup_stuck_sessions.start()
         self.setup_reminder.start()
+        self.vote_reminder_task.start()
+        self.vote_streak_reset_task.start()
 
     async def cog_load(self):
         """Re-register persistent ignore-reminder views for all unconfigured guilds after restart."""
@@ -2001,6 +2005,94 @@ class TasksCog(commands.Cog):
 
     @setup_reminder.before_loop
     async def before_setup_reminder(self):
+        await self.bot.wait_until_ready()
+
+    # ==================== VOTE REMINDER ====================
+    _VIENNA = ZoneInfo('Europe/Vienna')
+    _TOPGG_VOTE_URL = 'https://top.gg/bot/1445803895862333592/vote'
+
+    @tasks.loop(time=datetime.time(20, 0, tzinfo=ZoneInfo('Europe/Vienna')))
+    async def vote_reminder_task(self):
+        """DM users with active streak who haven't voted today (runs at 20:00 Vienna)."""
+        today = datetime.datetime.now(self._VIENNA).date()
+        today_midnight_ts = int(datetime.datetime.combine(
+            today, datetime.time(0, 0), tzinfo=self._VIENNA
+        ).timestamp())
+        today_str = today.isoformat()
+
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute(
+            '''SELECT user_id, current_streak FROM vote_streaks
+               WHERE current_streak > 0
+               AND last_vote_time < ?
+               AND (last_reminder_date IS NULL OR last_reminder_date != ?)''',
+            (today_midnight_ts, today_str)
+        )
+        rows = c.fetchall()
+        conn.close()
+
+        for user_id, streak in rows:
+            member = None
+            for guild in self.bot.guilds:
+                member = guild.get_member(user_id)
+                if member:
+                    break
+            if not member:
+                continue
+
+            embed = discord.Embed(
+                title='⏰ Abstimmen nicht vergessen!',
+                description=(
+                    f'Du hast heute noch nicht abgestimmt!\n'
+                    f'Dein **{streak}-Tage Streak** ist in Gefahr! 🔥\n\n'
+                    f'[➡️ Jetzt abstimmen]({self._TOPGG_VOTE_URL})'
+                ),
+                color=discord.Color.orange(),
+            )
+            embed.set_footer(text='Streaks werden um Mitternacht zurückgesetzt wenn du nicht votest.')
+
+            try:
+                await member.send(embed=embed)
+                conn = get_db_connection()
+                conn.execute(
+                    'UPDATE vote_streaks SET last_reminder_date = ? WHERE user_id = ?',
+                    (today_str, user_id)
+                )
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
+
+    @vote_reminder_task.before_loop
+    async def before_vote_reminder_task(self):
+        await self.bot.wait_until_ready()
+
+    # ==================== VOTE STREAK RESET ====================
+
+    @tasks.loop(time=datetime.time(0, 0, tzinfo=ZoneInfo('Europe/Vienna')))
+    async def vote_streak_reset_task(self):
+        """Reset streak for users who didn't vote yesterday (runs at midnight Vienna)."""
+        yesterday = (datetime.datetime.now(self._VIENNA) - datetime.timedelta(days=1)).date()
+        yesterday_midnight_ts = int(datetime.datetime.combine(
+            yesterday, datetime.time(0, 0), tzinfo=self._VIENNA
+        ).timestamp())
+
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute(
+            'UPDATE vote_streaks SET current_streak = 0 WHERE current_streak > 0 AND last_vote_time < ?',
+            (yesterday_midnight_ts,)
+        )
+        affected = c.rowcount
+        conn.commit()
+        conn.close()
+
+        if affected > 0:
+            logger.info(f'vote_streak_reset: {affected} users had their streak reset')
+
+    @vote_streak_reset_task.before_loop
+    async def before_vote_streak_reset_task(self):
         await self.bot.wait_until_ready()
 
 

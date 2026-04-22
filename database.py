@@ -606,6 +606,13 @@ def init_db():
         best_streak INTEGER DEFAULT 0
     )''')
 
+    # Migrate vote_streaks: add last_reminder_date if missing
+    c.execute("PRAGMA table_info(vote_streaks)")
+    vs_columns = [col[1] for col in c.fetchall()]
+    if 'last_reminder_date' not in vs_columns:
+        c.execute('ALTER TABLE vote_streaks ADD COLUMN last_reminder_date TEXT DEFAULT NULL')
+        conn.commit()
+
     # Raid boss table
     c.execute('''CREATE TABLE IF NOT EXISTS raid_bosses (
         guild_id INTEGER PRIMARY KEY,
