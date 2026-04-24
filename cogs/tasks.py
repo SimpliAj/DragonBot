@@ -2023,7 +2023,7 @@ class TasksCog(commands.Cog):
         conn = get_db_connection()
         c = conn.cursor()
         c.execute(
-            '''SELECT user_id, current_streak FROM vote_streaks
+            '''SELECT user_id, current_streak, total_votes FROM vote_streaks
                WHERE current_streak > 0
                AND last_vote_time < ?
                AND (last_reminder_date IS NULL OR last_reminder_date != ?)''',
@@ -2032,7 +2032,7 @@ class TasksCog(commands.Cog):
         rows = c.fetchall()
         conn.close()
 
-        for user_id, streak in rows:
+        for user_id, streak, total_votes in rows:
             member = None
             for guild in self.bot.guilds:
                 member = guild.get_member(user_id)
@@ -2041,16 +2041,18 @@ class TasksCog(commands.Cog):
             if not member:
                 continue
 
+            day_in_cycle = ((total_votes) % 30) + 1
+
             embed = discord.Embed(
-                title='⏰ Abstimmen nicht vergessen!',
+                title="⏰ Don't forget to vote!",
                 description=(
-                    f'Du hast heute noch nicht abgestimmt!\n'
-                    f'Dein **{streak}-Tage Streak** ist in Gefahr! 🔥\n\n'
-                    f'[➡️ Jetzt abstimmen]({self._TOPGG_VOTE_URL})'
+                    f"You haven't voted today yet!\n"
+                    f'**Day {day_in_cycle}/30** in your current cycle — **{streak}-day streak** is at risk! 🔥\n\n'
+                    f'[➡️ Vote now]({self._TOPGG_VOTE_URL})'
                 ),
                 color=discord.Color.orange(),
             )
-            embed.set_footer(text='Streaks werden um Mitternacht zurückgesetzt wenn du nicht votest.')
+            embed.set_footer(text="Streaks reset at midnight if you don't vote.")
 
             try:
                 await member.send(embed=embed)
