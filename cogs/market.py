@@ -1224,7 +1224,7 @@ class MarketCog(commands.Cog):
                 for item in your_items_list:
                     options.append(discord.SelectOption(
                         label=f"{item['name']} (Have: {item['count']})",
-                        value=f"yours_{item['key']}",
+                        value=f"yours_{item['type']}_{item['key']}",
                         emoji=item['emoji']
                     ))
 
@@ -1239,19 +1239,16 @@ class MarketCog(commands.Cog):
 
             async def select_yours_callback(self, interaction: discord.Interaction):
                 await interaction.response.defer()
-                try:
-                    self.selected_yours = interaction.values[0].split('_')[1] if hasattr(interaction, 'values') and interaction.values else None
-                    if not self.selected_yours:
-                        await interaction.followup.send("❌ Please select an item!", ephemeral=True)
-                        return
-                except (IndexError, AttributeError):
-                    await interaction.followup.send("❌ Invalid selection!", ephemeral=True)
+                if not hasattr(interaction, 'values') or not interaction.values:
+                    await interaction.followup.send("❌ Please select an item!", ephemeral=True)
                     return
 
-                # Find selected item
+                selected_value = interaction.values[0]  # e.g. "yours_dragon_stone"
+
+                # Find selected item by matching full value
                 selected_item = None
                 for item in self.your_items_list:
-                    if item['key'] == self.selected_yours:
+                    if f"yours_{item['type']}_{item['key']}" == selected_value:
                         selected_item = item
                         break
 
@@ -1283,7 +1280,7 @@ class MarketCog(commands.Cog):
                         for item in self.parent_view.their_items_list:
                             their_options.append(discord.SelectOption(
                                 label=f"{item['name']} (They Have: {item['count']})",
-                                value=f"theirs_{item['key']}",
+                                value=f"theirs_{item['type']}_{item['key']}",
                                 emoji=item['emoji']
                             ))
 
@@ -1315,19 +1312,16 @@ class MarketCog(commands.Cog):
 
             async def select_theirs_callback(self, interaction: discord.Interaction, your_item):
                 await interaction.response.defer()
-                try:
-                    selected_theirs_key = interaction.values[0].split('_')[1] if hasattr(interaction, 'values') and interaction.values else None
-                    if not selected_theirs_key:
-                        await interaction.followup.send("❌ Please select an item!", ephemeral=True)
-                        return
-                except (IndexError, AttributeError):
-                    await interaction.followup.send("❌ Invalid selection!", ephemeral=True)
+                if not hasattr(interaction, 'values') or not interaction.values:
+                    await interaction.followup.send("❌ Please select an item!", ephemeral=True)
                     return
 
-                # Find selected item
+                selected_value = interaction.values[0]  # e.g. "theirs_dragon_stone"
+
+                # Find selected item by matching full value
                 selected_theirs = None
                 for item in self.their_items_list:
-                    if item['key'] == selected_theirs_key:
+                    if f"theirs_{item['type']}_{item['key']}" == selected_value:
                         selected_theirs = item
                         break
 

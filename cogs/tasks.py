@@ -312,7 +312,7 @@ class TasksCog(commands.Cog):
                                     channel = self.bot.get_channel(channel_id)
                                     if channel:
                                         from cogs.raids import RaidTierSelectView
-                                        view = RaidTierSelectView(guild_id, boss_name, boss_rarity, reward_dragon)
+                                        view = RaidTierSelectView(self.bot, guild_id, boss_name, boss_rarity, reward_dragon)
                                         await channel.send(embed=embed, view=view)
                                     else:
                                         # Channel was deleted - remove from DB

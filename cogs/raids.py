@@ -15,7 +15,7 @@ from typing import Optional
 from config import *
 from state import *
 import database
-from database import is_player_softlocked, update_balance
+from database import is_player_softlocked, update_balance, get_db_connection
 from utils import *
 from achievements import check_and_award_achievements, award_trophy, send_quest_notification
 
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 async def update_raid_embed(bot, guild_id, channel_id, user_tier=None):
     """Update the main raid boss embed with current HP and participant counts for ALL tiers"""
     try:
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection(120.0)
         c = conn.cursor()
 
         c.execute('SELECT easy_hp, easy_max_hp, normal_hp, normal_max_hp, hard_hp, hard_max_hp, boss_name, boss_rarity, reward_dragon, expires_at, message_id, easy_participants, normal_participants, hard_participants FROM raid_bosses WHERE guild_id = ?',
@@ -138,7 +138,7 @@ class RaidTierSelectView(discord.ui.View):
         await self._join_tier(btn_interaction, 'hard')
 
     async def _join_tier(self, btn_interaction: discord.Interaction, tier: str):
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection(120.0)
         c = conn.cursor()
 
         c.execute('SELECT tier FROM raid_damage WHERE guild_id = ? AND user_id = ?',
@@ -247,7 +247,7 @@ class RaidAttackView(discord.ui.View):
     async def attack_button(self, btn_interaction: discord.Interaction, button: discord.ui.Button):
         current_time = int(time.time())
 
-        conn_a = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn_a = get_db_connection(120.0)
         c_a = conn_a.cursor()
 
         # Check if user is registered in raid_damage
@@ -787,7 +787,7 @@ class RaidBossStatusView(discord.ui.View):
     async def attack_button(self, btn_interaction: discord.Interaction, button: discord.ui.Button):
         current_time = int(time.time())
 
-        conn_a = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn_a = get_db_connection(120.0)
         c_a = conn_a.cursor()
 
         # Check if this is a shared-pool raid
@@ -1142,7 +1142,7 @@ async def spawn_raid_boss_ritual(bot, guild_id: int, channel: discord.TextChanne
     reward_data = DRAGON_TYPES[reward_dragon]
 
     # Store in DB - SHARED POOL (all in normal_hp, easy/hard empty)
-    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+    conn = get_db_connection(120.0)
     c = conn.cursor()
 
     c.execute('DELETE FROM raid_bosses WHERE guild_id = ?', (guild_id,))
@@ -1205,7 +1205,7 @@ async def spawn_raid_boss_ritual(bot, guild_id: int, channel: discord.TextChanne
     raid_msg = await channel.send(embed=embed, view=view)
 
     # Update message_id in DB
-    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+    conn = get_db_connection(120.0)
     c = conn.cursor()
     c.execute('UPDATE raid_bosses SET message_id = ? WHERE guild_id = ?', (raid_msg.id, guild_id))
     conn.commit()
@@ -1277,7 +1277,7 @@ class RaidsCog(commands.Cog):
             return
 
         # Dragons required per difficulty (scales with server size)
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection(120.0)
         c = conn.cursor()
 
         # Count distinct active players who own at least 1 dragon of any accepted rarity
@@ -1358,7 +1358,7 @@ class RaidsCog(commands.Cog):
                 ritual_rarities = ritual['rarities']
 
                 # Get user's dragons of any accepted rarity
-                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                conn = get_db_connection(120.0)
                 c = conn.cursor()
 
                 c.execute('''SELECT dragon_type, count FROM user_dragons
@@ -1442,7 +1442,7 @@ class RaidsCog(commands.Cog):
                                     return
 
                                 # Check user has dragons
-                                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                conn = get_db_connection(120.0)
                                 c = conn.cursor()
                                 c.execute('SELECT count FROM user_dragons WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
                                           (gid, inter3.user.id, dt))
@@ -1469,7 +1469,7 @@ class RaidsCog(commands.Cog):
                                 # Check if ritual complete
                                 if ritual['donated'] >= ritual['required']:
                                     # Ritual complete! Remove all dragons NOW and spawn boss
-                                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                    conn = get_db_connection(120.0)
                                     c = conn.cursor()
 
                                     # Remove all donated dragons from all users
@@ -1555,7 +1555,7 @@ class RaidsCog(commands.Cog):
 
                 # Return dragons to all donors
                 if ritual['donors']:
-                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                    conn = get_db_connection(120.0)
                     c = conn.cursor()
 
                     returned_users = []
@@ -1617,7 +1617,7 @@ class RaidsCog(commands.Cog):
                 ephemeral=True)
             return
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection(120.0)
         c = conn.cursor()
 
         # Check if there's an active raid boss
