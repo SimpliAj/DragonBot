@@ -100,7 +100,7 @@ def _update_vote_streak(user_id: int) -> dict:
         total += 1
         best = max(best, streak)
 
-        c.execute('UPDATE vote_streaks SET current_streak=?, last_vote_time=?, total_votes=?, best_streak=? WHERE user_id=?',
+        c.execute('UPDATE vote_streaks SET current_streak=?, last_vote_time=?, total_votes=?, best_streak=?, reminder_sent_at=NULL WHERE user_id=?',
                   (streak, now, total, best, user_id))
         conn.commit()
         conn.close()

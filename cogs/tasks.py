@@ -86,6 +86,7 @@ class TasksCog(commands.Cog):
         self.setup_reminder.start()
         self.vote_reminder_task.start()
         self.vote_streak_reset_task.start()
+        self.vote_reminder_deadline_task.start()
 
     async def cog_load(self):
         """Re-register persistent ignore-reminder views for all unconfigured guilds after restart."""
@@ -2052,14 +2053,14 @@ class TasksCog(commands.Cog):
                 ),
                 color=discord.Color.orange(),
             )
-            embed.set_footer(text="Streaks reset at midnight if you don't vote.")
+            embed.set_footer(text="You have 4 hours after this reminder to vote or your streak resets!")
 
             try:
                 await member.send(embed=embed)
                 conn = get_db_connection()
                 conn.execute(
-                    'UPDATE vote_streaks SET last_reminder_date = ? WHERE user_id = ?',
-                    (today_str, user_id)
+                    'UPDATE vote_streaks SET last_reminder_date = ?, reminder_sent_at = ? WHERE user_id = ?',
+                    (today_str, int(time.time()), user_id)
                 )
                 conn.commit()
                 conn.close()
@@ -2095,6 +2096,33 @@ class TasksCog(commands.Cog):
 
     @vote_streak_reset_task.before_loop
     async def before_vote_streak_reset_task(self):
+        await self.bot.wait_until_ready()
+
+    @tasks.loop(minutes=5)
+    async def vote_reminder_deadline_task(self):
+        """Reset streak for users who didn't vote within 4h of their reminder DM."""
+        now = int(time.time())
+        deadline = now - 4 * 3600  # 4 hours ago
+
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute(
+            '''UPDATE vote_streaks SET current_streak = 0, reminder_sent_at = NULL
+               WHERE current_streak > 0
+               AND reminder_sent_at IS NOT NULL
+               AND reminder_sent_at < ?
+               AND last_vote_time < reminder_sent_at''',
+            (deadline,)
+        )
+        affected = c.rowcount
+        conn.commit()
+        conn.close()
+
+        if affected > 0:
+            logger.info(f'vote_reminder_deadline: {affected} users streak reset after 4h no-vote')
+
+    @vote_reminder_deadline_task.before_loop
+    async def before_vote_reminder_deadline_task(self):
         await self.bot.wait_until_ready()
 
 

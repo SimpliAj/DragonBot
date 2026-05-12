@@ -612,6 +612,9 @@ def init_db():
     if 'last_reminder_date' not in vs_columns:
         c.execute('ALTER TABLE vote_streaks ADD COLUMN last_reminder_date TEXT DEFAULT NULL')
         conn.commit()
+    if 'reminder_sent_at' not in vs_columns:
+        c.execute('ALTER TABLE vote_streaks ADD COLUMN reminder_sent_at INTEGER DEFAULT NULL')
+        conn.commit()
 
     # Raid boss table
     c.execute('''CREATE TABLE IF NOT EXISTS raid_bosses (
