@@ -1348,6 +1348,11 @@ class TasksCog(commands.Cog):
                     except:
                         pass
 
+    @spawn_black_market.error
+    async def on_spawn_black_market_error(self, error):
+        logger.error(f"spawn_black_market crashed, restarting: {error}", exc_info=True)
+        self.spawn_black_market.restart()
+
     @spawn_black_market.before_loop
     async def before_spawn_black_market(self):
         await self.bot.wait_until_ready()
@@ -1362,11 +1367,16 @@ class TasksCog(commands.Cog):
         c = conn.cursor()
 
         # Get ALL pending breedings (not filtered by scheduled_for anymore)
-        c.execute('''SELECT queue_id, guild_id, user_id, parent1_type, parent2_type
+        try:
+            c.execute('''SELECT queue_id, guild_id, user_id, parent1_type, parent2_type
                      FROM breeding_queue
                      WHERE status = 'pending'
                      ORDER BY created_at ASC''')
-        all_breedings = c.fetchall()
+            all_breedings = c.fetchall()
+        except Exception as e:
+            logger.error(f"process_breeding_queue initial query failed: {e}", exc_info=True)
+            conn.close()
+            return
 
         for queue_id, guild_id, user_id, parent1, parent2 in all_breedings:
             try:
@@ -1681,6 +1691,11 @@ class TasksCog(commands.Cog):
                 conn.commit()
 
         conn.close()
+
+    @process_breeding_queue.error
+    async def on_process_breeding_queue_error(self, error):
+        logger.error(f"process_breeding_queue crashed, restarting: {error}", exc_info=True)
+        self.process_breeding_queue.restart()
 
     @process_breeding_queue.before_loop
     async def before_process_breeding_queue(self):
@@ -2087,23 +2102,33 @@ class TasksCog(commands.Cog):
     @tasks.loop(time=datetime.time(0, 0, tzinfo=ZoneInfo('Europe/Vienna')))
     async def vote_streak_reset_task(self):
         """Reset streak for users who didn't vote yesterday (runs at midnight Vienna)."""
-        yesterday = (datetime.datetime.now(self._VIENNA) - datetime.timedelta(days=1)).date()
-        yesterday_midnight_ts = int(datetime.datetime.combine(
-            yesterday, datetime.time(0, 0), tzinfo=self._VIENNA
-        ).timestamp())
+        conn = None
+        try:
+            yesterday = (datetime.datetime.now(self._VIENNA) - datetime.timedelta(days=1)).date()
+            yesterday_midnight_ts = int(datetime.datetime.combine(
+                yesterday, datetime.time(0, 0), tzinfo=self._VIENNA
+            ).timestamp())
 
-        conn = get_db_connection()
-        c = conn.cursor()
-        c.execute(
-            'UPDATE vote_streaks SET current_streak = 0 WHERE current_streak > 0 AND last_vote_time < ?',
-            (yesterday_midnight_ts,)
-        )
-        affected = c.rowcount
-        conn.commit()
-        conn.close()
+            conn = get_db_connection()
+            c = conn.cursor()
+            c.execute(
+                'UPDATE vote_streaks SET current_streak = 0 WHERE current_streak > 0 AND last_vote_time < ?',
+                (yesterday_midnight_ts,)
+            )
+            affected = c.rowcount
+            conn.commit()
+            if affected > 0:
+                logger.info(f'vote_streak_reset: {affected} users had their streak reset')
+        except Exception as e:
+            logger.error(f"Error in vote_streak_reset_task: {e}", exc_info=True)
+        finally:
+            if conn:
+                conn.close()
 
-        if affected > 0:
-            logger.info(f'vote_streak_reset: {affected} users had their streak reset')
+    @vote_streak_reset_task.error
+    async def on_vote_streak_reset_error(self, error):
+        logger.error(f"vote_streak_reset_task crashed, restarting: {error}", exc_info=True)
+        self.vote_streak_reset_task.restart()
 
     @vote_streak_reset_task.before_loop
     async def before_vote_streak_reset_task(self):
