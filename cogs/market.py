@@ -314,189 +314,181 @@ class MarketCog(commands.Cog):
                 # Re-fetch listing from database to ensure it's still available
                 conn = get_db_connection(timeout=60.0)
                 c = conn.cursor()
-                c.execute('''SELECT listing_id, seller_id, dragon_type, price, listed_at, item_type
-                             FROM market_listings
-                             WHERE listing_id = ? AND guild_id = ?''',
-                          (listing_id, interaction.guild_id))
-                db_listing = c.fetchone()
+                try:
+                    c.execute('''SELECT listing_id, seller_id, dragon_type, price, listed_at, item_type
+                                 FROM market_listings
+                                 WHERE listing_id = ? AND guild_id = ?''',
+                              (listing_id, interaction.guild_id))
+                    db_listing = c.fetchone()
 
-                if not db_listing:
-                    conn.close()
-                    await interaction.followup.send("❌ This listing is no longer available!", ephemeral=False)
-                    return
-
-                listing_id, seller_id, dragon_type, price, listed_at, item_type = db_listing
-
-                # Handle null item_type (default to 'dragon')
-                if item_type is None:
-                    item_type = 'dragon'
-
-                seller = self.guild.get_member(seller_id)
-                seller_name = seller.display_name if seller else "Unknown"
-
-                # Check if buyer has enough coins
-                buyer_data = get_user(interaction.guild_id, interaction.user.id)
-                buyer_balance = buyer_data[2]
-
-                if buyer_balance < price:
-                    await interaction.followup.send(
-                        f"❌ You need {price} 🪙 but only have {int(buyer_balance)} 🪙!",
-                        ephemeral=False
-                    )
-                    conn.close()
-                    return
-
-                # Check if buyer is trying to buy their own listing
-                if seller_id == interaction.user.id:
-                    await interaction.followup.send("❌ You can't buy your own listing!", ephemeral=False)
-                    conn.close()
-                    return
-
-                # Process transaction based on item type
-                item_desc = ""
-
-                if item_type == 'lucky_charm':
-                    c.execute('SELECT count FROM user_luckycharms WHERE guild_id = ? AND user_id = ?',
-                              (interaction.guild_id, seller_id))
-                    seller_item = c.fetchone()
-
-                    if not seller_item or seller_item[0] < 1:
-                        c.execute('DELETE FROM market_listings WHERE listing_id = ?', (listing_id,))
-                        conn.commit()
-                        conn.close()
-                        await interaction.followup.send("❌ Seller no longer has this item! Listing removed.", ephemeral=False)
+                    if not db_listing:
+                        await interaction.followup.send("❌ This listing is no longer available!", ephemeral=False)
                         return
 
-                    c.execute('UPDATE user_luckycharms SET count = count - 1 WHERE guild_id = ? AND user_id = ?',
-                              (interaction.guild_id, seller_id))
-                    c.execute('INSERT INTO user_luckycharms (guild_id, user_id, count) VALUES (?, ?, 1) ON CONFLICT(guild_id, user_id) DO UPDATE SET count = count + 1',
-                              (interaction.guild_id, interaction.user.id))
-                    item_desc = "🍀 Lucky Charm"
+                    listing_id, seller_id, dragon_type, price, listed_at, item_type = db_listing
 
-                elif item_type == 'dna':
-                    c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
-                              (interaction.guild_id, seller_id, 'dna'))
-                    seller_item = c.fetchone()
+                    # Handle null item_type (default to 'dragon')
+                    if item_type is None:
+                        item_type = 'dragon'
 
-                    if not seller_item or seller_item[0] < 1:
-                        c.execute('DELETE FROM market_listings WHERE listing_id = ?', (listing_id,))
-                        conn.commit()
-                        conn.close()
-                        await interaction.followup.send("❌ Seller no longer has this item! Listing removed.", ephemeral=False)
+                    seller = self.guild.get_member(seller_id)
+                    seller_name = seller.display_name if seller else "Unknown"
+
+                    # Check if buyer has enough coins
+                    buyer_data = get_user(interaction.guild_id, interaction.user.id)
+                    buyer_balance = buyer_data[2]
+
+                    if buyer_balance < price:
+                        await interaction.followup.send(
+                            f"❌ You need {price} 🪙 but only have {int(buyer_balance)} 🪙!",
+                            ephemeral=False
+                        )
                         return
 
-                    c.execute('UPDATE user_items SET count = count - 1 WHERE guild_id = ? AND user_id = ? AND item_type = ?',
-                              (interaction.guild_id, seller_id, 'dna'))
-                    c.execute('INSERT INTO user_items (guild_id, user_id, item_type, count) VALUES (?, ?, ?, 1) ON CONFLICT(guild_id, user_id, item_type) DO UPDATE SET count = count + 1',
-                              (interaction.guild_id, interaction.user.id, 'dna'))
-                    item_desc = "🧬 Dragon DNA"
-
-                elif item_type == 'dragonscale':
-                    c.execute('SELECT minutes FROM dragonscales WHERE guild_id = ? AND user_id = ?',
-                              (interaction.guild_id, seller_id))
-                    seller_item = c.fetchone()
-
-                    if not seller_item or seller_item[0] < 1:
-                        c.execute('DELETE FROM market_listings WHERE listing_id = ?', (listing_id,))
-                        conn.commit()
-                        conn.close()
-                        await interaction.followup.send("❌ Seller no longer has this item! Listing removed.", ephemeral=False)
+                    # Check if buyer is trying to buy their own listing
+                    if seller_id == interaction.user.id:
+                        await interaction.followup.send("❌ You can't buy your own listing!", ephemeral=False)
                         return
 
-                    c.execute('UPDATE dragonscales SET minutes = minutes - 1 WHERE guild_id = ? AND user_id = ?',
-                              (interaction.guild_id, seller_id))
-                    c.execute('INSERT INTO dragonscales (guild_id, user_id, minutes) VALUES (?, ?, 1) ON CONFLICT(guild_id, user_id) DO UPDATE SET minutes = minutes + 1',
-                              (interaction.guild_id, interaction.user.id))
-                    item_desc = "<:dragonscale:1446278170998341693> Dragonscale"
+                    # Process transaction based on item type
+                    item_desc = ""
 
-                elif item_type.startswith('pack_'):
-                    pack_type = item_type.replace('pack_', '')
-                    pack_names_map = {
-                        'wooden': 'Wooden Pack', 'stone': 'Stone Pack', 'bronze': 'Bronze Pack', 'silver': 'Silver Pack',
-                        'gold': 'Gold Pack', 'platinum': 'Platinum Pack', 'diamond': 'Diamond Pack', 'celestial': 'Celestial Pack'
-                    }
-                    pack_emojis_map = {
-                        'wooden': '<:woodenchest:1446170002708238476>', 'stone': '<:stonechest:1446169958265389247>',
-                        'bronze': '<:bronzechest:1446169758599745586>', 'silver': '<:silverchest:1446169917996011520>',
-                        'gold': '<:goldchest:1446169876438978681>', 'platinum': '<:platinumchest:1446169876438978681>',
-                        'diamond': '<:diamondchest:1446169830720929985>', 'celestial': '<:celestialchest:1446169830720929985>'
-                    }
+                    if item_type == 'lucky_charm':
+                        c.execute('SELECT count FROM user_luckycharms WHERE guild_id = ? AND user_id = ?',
+                                  (interaction.guild_id, seller_id))
+                        seller_item = c.fetchone()
 
-                    c.execute('SELECT count FROM user_packs WHERE guild_id = ? AND user_id = ? AND pack_type = ?',
-                              (interaction.guild_id, seller_id, pack_type))
-                    seller_item = c.fetchone()
-
-                    if not seller_item or seller_item[0] < 1:
-                        c.execute('DELETE FROM market_listings WHERE listing_id = ?', (listing_id,))
-                        conn.commit()
-                        conn.close()
-                        await interaction.followup.send("❌ Seller no longer has this item! Listing removed.", ephemeral=False)
-                        return
-
-                    c.execute('UPDATE user_packs SET count = count - 1 WHERE guild_id = ? AND user_id = ? AND pack_type = ?',
-                              (interaction.guild_id, seller_id, pack_type))
-                    c.execute('INSERT INTO user_packs (guild_id, user_id, pack_type, count) VALUES (?, ?, ?, 1) ON CONFLICT(guild_id, user_id, pack_type) DO UPDATE SET count = count + 1',
-                              (interaction.guild_id, interaction.user.id, pack_type))
-                    item_desc = f"{pack_emojis_map[pack_type]} {pack_names_map[pack_type]}"
-
-                elif item_type in ['night_vision', 'lucky_dice']:
-                    c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
-                              (interaction.guild_id, seller_id, item_type))
-                    seller_item = c.fetchone()
-
-                    if not seller_item or seller_item[0] < 1:
-                        c.execute('DELETE FROM market_listings WHERE listing_id = ?', (listing_id,))
-                        conn.commit()
-                        conn.close()
-                        await interaction.followup.send("❌ Seller no longer has this item! Listing removed.", ephemeral=False)
-                        return
-
-                    c.execute('UPDATE user_items SET count = count - 1 WHERE guild_id = ? AND user_id = ? AND item_type = ?',
-                              (interaction.guild_id, seller_id, item_type))
-                    c.execute('INSERT INTO user_items (guild_id, user_id, item_type, count) VALUES (?, ?, ?, 1) ON CONFLICT(guild_id, user_id, item_type) DO UPDATE SET count = count + 1',
-                              (interaction.guild_id, interaction.user.id, item_type))
-
-                    item_emoji_map = {'night_vision': '🌙', 'lucky_dice': '🎰'}
-                    item_name_map = {'night_vision': 'Night Vision', 'lucky_dice': 'Lucky Dice'}
-                    item_desc = f"{item_emoji_map[item_type]} {item_name_map[item_type]}"
-
-                else:  # It's a dragon or unknown item
-                    if dragon_type:
-                        c.execute('SELECT count FROM user_dragons WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
-                                  (interaction.guild_id, seller_id, dragon_type))
-                        seller_count = c.fetchone()
-
-                        if not seller_count or seller_count[0] < 1:
+                        if not seller_item or seller_item[0] < 1:
                             c.execute('DELETE FROM market_listings WHERE listing_id = ?', (listing_id,))
                             conn.commit()
-                            conn.close()
-                            await interaction.followup.send("❌ Seller no longer has this dragon! Listing removed.", ephemeral=False)
+                            await interaction.followup.send("❌ Seller no longer has this item! Listing removed.", ephemeral=False)
                             return
 
-                        # Transfer dragon from seller to buyer
-                        await add_dragons(interaction.guild_id, seller_id, dragon_type, -1)
-                        await add_dragons(interaction.guild_id, interaction.user.id, dragon_type, 1)
+                        c.execute('UPDATE user_luckycharms SET count = count - 1 WHERE guild_id = ? AND user_id = ?',
+                                  (interaction.guild_id, seller_id))
+                        c.execute('INSERT INTO user_luckycharms (guild_id, user_id, count) VALUES (?, ?, 1) ON CONFLICT(guild_id, user_id) DO UPDATE SET count = count + 1',
+                                  (interaction.guild_id, interaction.user.id))
+                        item_desc = "🍀 Lucky Charm"
 
-                        if dragon_type in DRAGON_TYPES:
-                            dragon_data = DRAGON_TYPES[dragon_type]
-                            item_desc = f"{dragon_data['emoji']} {dragon_data['name']}"
+                    elif item_type == 'dna':
+                        c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
+                                  (interaction.guild_id, seller_id, 'dna'))
+                        seller_item = c.fetchone()
+
+                        if not seller_item or seller_item[0] < 1:
+                            c.execute('DELETE FROM market_listings WHERE listing_id = ?', (listing_id,))
+                            conn.commit()
+                            await interaction.followup.send("❌ Seller no longer has this item! Listing removed.", ephemeral=False)
+                            return
+
+                        c.execute('UPDATE user_items SET count = count - 1 WHERE guild_id = ? AND user_id = ? AND item_type = ?',
+                                  (interaction.guild_id, seller_id, 'dna'))
+                        c.execute('INSERT INTO user_items (guild_id, user_id, item_type, count) VALUES (?, ?, ?, 1) ON CONFLICT(guild_id, user_id, item_type) DO UPDATE SET count = count + 1',
+                                  (interaction.guild_id, interaction.user.id, 'dna'))
+                        item_desc = "🧬 Dragon DNA"
+
+                    elif item_type == 'dragonscale':
+                        c.execute('SELECT minutes FROM dragonscales WHERE guild_id = ? AND user_id = ?',
+                                  (interaction.guild_id, seller_id))
+                        seller_item = c.fetchone()
+
+                        if not seller_item or seller_item[0] < 1:
+                            c.execute('DELETE FROM market_listings WHERE listing_id = ?', (listing_id,))
+                            conn.commit()
+                            await interaction.followup.send("❌ Seller no longer has this item! Listing removed.", ephemeral=False)
+                            return
+
+                        c.execute('UPDATE dragonscales SET minutes = minutes - 1 WHERE guild_id = ? AND user_id = ?',
+                                  (interaction.guild_id, seller_id))
+                        c.execute('INSERT INTO dragonscales (guild_id, user_id, minutes) VALUES (?, ?, 1) ON CONFLICT(guild_id, user_id) DO UPDATE SET minutes = minutes + 1',
+                                  (interaction.guild_id, interaction.user.id))
+                        item_desc = "<:dragonscale:1446278170998341693> Dragonscale"
+
+                    elif item_type.startswith('pack_'):
+                        pack_type = item_type.replace('pack_', '')
+                        pack_names_map = {
+                            'wooden': 'Wooden Pack', 'stone': 'Stone Pack', 'bronze': 'Bronze Pack', 'silver': 'Silver Pack',
+                            'gold': 'Gold Pack', 'platinum': 'Platinum Pack', 'diamond': 'Diamond Pack', 'celestial': 'Celestial Pack'
+                        }
+                        pack_emojis_map = {
+                            'wooden': '<:woodenchest:1446170002708238476>', 'stone': '<:stonechest:1446169958265389247>',
+                            'bronze': '<:bronzechest:1446169758599745586>', 'silver': '<:silverchest:1446169917996011520>',
+                            'gold': '<:goldchest:1446169876438978681>', 'platinum': '<:platinumchest:1446169876438978681>',
+                            'diamond': '<:diamondchest:1446169830720929985>', 'celestial': '<:celestialchest:1446169830720929985>'
+                        }
+
+                        c.execute('SELECT count FROM user_packs WHERE guild_id = ? AND user_id = ? AND pack_type = ?',
+                                  (interaction.guild_id, seller_id, pack_type))
+                        seller_item = c.fetchone()
+
+                        if not seller_item or seller_item[0] < 1:
+                            c.execute('DELETE FROM market_listings WHERE listing_id = ?', (listing_id,))
+                            conn.commit()
+                            await interaction.followup.send("❌ Seller no longer has this item! Listing removed.", ephemeral=False)
+                            return
+
+                        c.execute('UPDATE user_packs SET count = count - 1 WHERE guild_id = ? AND user_id = ? AND pack_type = ?',
+                                  (interaction.guild_id, seller_id, pack_type))
+                        c.execute('INSERT INTO user_packs (guild_id, user_id, pack_type, count) VALUES (?, ?, ?, 1) ON CONFLICT(guild_id, user_id, pack_type) DO UPDATE SET count = count + 1',
+                                  (interaction.guild_id, interaction.user.id, pack_type))
+                        item_desc = f"{pack_emojis_map[pack_type]} {pack_names_map[pack_type]}"
+
+                    elif item_type in ['night_vision', 'lucky_dice']:
+                        c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
+                                  (interaction.guild_id, seller_id, item_type))
+                        seller_item = c.fetchone()
+
+                        if not seller_item or seller_item[0] < 1:
+                            c.execute('DELETE FROM market_listings WHERE listing_id = ?', (listing_id,))
+                            conn.commit()
+                            await interaction.followup.send("❌ Seller no longer has this item! Listing removed.", ephemeral=False)
+                            return
+
+                        c.execute('UPDATE user_items SET count = count - 1 WHERE guild_id = ? AND user_id = ? AND item_type = ?',
+                                  (interaction.guild_id, seller_id, item_type))
+                        c.execute('INSERT INTO user_items (guild_id, user_id, item_type, count) VALUES (?, ?, ?, 1) ON CONFLICT(guild_id, user_id, item_type) DO UPDATE SET count = count + 1',
+                                  (interaction.guild_id, interaction.user.id, item_type))
+
+                        item_emoji_map = {'night_vision': '🌙', 'lucky_dice': '🎰'}
+                        item_name_map = {'night_vision': 'Night Vision', 'lucky_dice': 'Lucky Dice'}
+                        item_desc = f"{item_emoji_map[item_type]} {item_name_map[item_type]}"
+
+                    else:  # It's a dragon or unknown item
+                        if dragon_type:
+                            c.execute('SELECT count FROM user_dragons WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
+                                      (interaction.guild_id, seller_id, dragon_type))
+                            seller_count = c.fetchone()
+
+                            if not seller_count or seller_count[0] < 1:
+                                c.execute('DELETE FROM market_listings WHERE listing_id = ?', (listing_id,))
+                                conn.commit()
+                                await interaction.followup.send("❌ Seller no longer has this dragon! Listing removed.", ephemeral=False)
+                                return
+
+                            # Transfer dragon from seller to buyer
+                            await add_dragons(interaction.guild_id, seller_id, dragon_type, -1)
+                            await add_dragons(interaction.guild_id, interaction.user.id, dragon_type, 1)
+
+                            if dragon_type in DRAGON_TYPES:
+                                dragon_data = DRAGON_TYPES[dragon_type]
+                                item_desc = f"{dragon_data['emoji']} {dragon_data['name']}"
+                            else:
+                                item_desc = f"🐉 Dragon ({dragon_type})"
+
+                            # Record sale for price history
+                            c.execute('INSERT INTO market_sales (guild_id, dragon_type, price, sold_at) VALUES (?, ?, ?, ?)',
+                                      (interaction.guild_id, dragon_type, price, int(time.time())))
                         else:
-                            item_desc = f"🐉 Dragon ({dragon_type})"
+                            c.execute('DELETE FROM market_listings WHERE listing_id = ?', (listing_id,))
+                            conn.commit()
+                            await interaction.followup.send("❌ Unknown item type in listing. Listing removed.", ephemeral=False)
+                            return
 
-                        # Record sale for price history
-                        c.execute('INSERT INTO market_sales (guild_id, dragon_type, price, sold_at) VALUES (?, ?, ?, ?)',
-                                  (interaction.guild_id, dragon_type, price, int(time.time())))
-                    else:
-                        c.execute('DELETE FROM market_listings WHERE listing_id = ?', (listing_id,))
-                        conn.commit()
-                        conn.close()
-                        await interaction.followup.send("❌ Unknown item type in listing. Listing removed.", ephemeral=False)
-                        return
-
-                # Remove listing BEFORE updating balance
-                c.execute('DELETE FROM market_listings WHERE listing_id = ?', (listing_id,))
-                conn.commit()
-                conn.close()
+                    # Remove listing BEFORE updating balance
+                    c.execute('DELETE FROM market_listings WHERE listing_id = ?', (listing_id,))
+                    conn.commit()
+                finally:
+                    conn.close()
 
                 # Transfer coins from buyer to seller
                 try:

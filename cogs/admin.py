@@ -3,6 +3,7 @@ cogs/admin.py - Admin commands: setchannel and handle_dev_command.
 Extracted verbatim from bot.py.
 """
 
+import ast
 import asyncio
 import json
 import random
@@ -40,7 +41,9 @@ class AdminCog(commands.Cog):
 
     @app_commands.command(name="setchannel", description="Set current channel as dragon spawn channel (Admin only)")
     async def setchannel(self, interaction: discord.Interaction):
-        if not interaction.user.guild_permissions.administrator:
+        perms = interaction.user.guild_permissions
+        is_owner = interaction.guild.owner_id == interaction.user.id
+        if not (perms.administrator or perms.manage_guild or is_owner):
             await interaction.response.send_message("❌ You need administrator permissions!", ephemeral=False)
             return
 
@@ -106,25 +109,26 @@ async def handle_dev_command(message, command, args):
         if reset_all:
             # Reset for ALL users in the server
             conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
-            c = conn.cursor()
+            try:
+                c = conn.cursor()
 
-            # Get all users who have EVER used Dragon Nest in this server
-            c.execute('''SELECT DISTINCT user_id FROM dragon_nest WHERE guild_id = ?''',
-                      (guild_id,))
-            all_user_ids = [row[0] for row in c.fetchall()]
+                # Get all users who have EVER used Dragon Nest in this server
+                c.execute('''SELECT DISTINCT user_id FROM dragon_nest WHERE guild_id = ?''',
+                          (guild_id,))
+                all_user_ids = [row[0] for row in c.fetchall()]
 
-            if not all_user_ids:
-                await message.channel.send("❌ No users with Dragon Nest progress found in this server!")
+                if not all_user_ids:
+                    await message.channel.send("❌ No users with Dragon Nest progress found in this server!")
+                    return
+
+                # Delete all perks for all users
+                c.execute('DELETE FROM user_perks WHERE guild_id = ?', (guild_id,))
+                c.execute('DELETE FROM active_perks WHERE guild_id = ?', (guild_id,))
+                c.execute('DELETE FROM pending_perks WHERE guild_id = ?', (guild_id,))
+
+                conn.commit()
+            finally:
                 conn.close()
-                return
-
-            # Delete all perks for all users
-            c.execute('DELETE FROM user_perks WHERE guild_id = ?', (guild_id,))
-            c.execute('DELETE FROM active_perks WHERE guild_id = ?', (guild_id,))
-            c.execute('DELETE FROM pending_perks WHERE guild_id = ?', (guild_id,))
-
-            conn.commit()
-            conn.close()
 
             embed = discord.Embed(
                 title="✅ Dragon Nest Perks Reset (All Users)",
@@ -161,40 +165,42 @@ async def handle_dev_command(message, command, args):
 
             user = message.mentions[0]
             conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
-            c = conn.cursor()
+            try:
+                c = conn.cursor()
 
-            # Get Dragon Nest info if it exists
-            c.execute('SELECT level, upgrade_level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
-                      (guild_id, user.id))
-            result = c.fetchone()
-            current_level = result[0] if result else 0
-            upgrade_level = result[1] if result and len(result) > 1 else 0
+                # Get Dragon Nest info if it exists
+                c.execute('SELECT level, upgrade_level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
+                          (guild_id, user.id))
+                result = c.fetchone()
+                current_level = result[0] if result else 0
+                upgrade_level = result[1] if result and len(result) > 1 else 0
 
-            # Count perks before deletion
-            c.execute('SELECT COUNT(*) FROM user_perks WHERE guild_id = ? AND user_id = ?',
-                      (guild_id, user.id))
-            level_perks_count = c.fetchone()[0]
+                # Count perks before deletion
+                c.execute('SELECT COUNT(*) FROM user_perks WHERE guild_id = ? AND user_id = ?',
+                          (guild_id, user.id))
+                level_perks_count = c.fetchone()[0]
 
-            c.execute('SELECT COUNT(*) FROM active_perks WHERE guild_id = ? AND user_id = ?',
-                      (guild_id, user.id))
-            permanent_perks_count = c.fetchone()[0]
+                c.execute('SELECT COUNT(*) FROM active_perks WHERE guild_id = ? AND user_id = ?',
+                          (guild_id, user.id))
+                permanent_perks_count = c.fetchone()[0]
 
-            c.execute('SELECT COUNT(*) FROM pending_perks WHERE guild_id = ? AND user_id = ?',
-                      (guild_id, user.id))
-            pending_perks_count = c.fetchone()[0]
+                c.execute('SELECT COUNT(*) FROM pending_perks WHERE guild_id = ? AND user_id = ?',
+                          (guild_id, user.id))
+                pending_perks_count = c.fetchone()[0]
 
-            total_perks = level_perks_count + permanent_perks_count + pending_perks_count
+                total_perks = level_perks_count + permanent_perks_count + pending_perks_count
 
-            # Delete ALL perks
-            c.execute('DELETE FROM user_perks WHERE guild_id = ? AND user_id = ?',
-                      (guild_id, user.id))
-            c.execute('DELETE FROM active_perks WHERE guild_id = ? AND user_id = ?',
-                      (guild_id, user.id))
-            c.execute('DELETE FROM pending_perks WHERE guild_id = ? AND user_id = ?',
-                      (guild_id, user.id))
+                # Delete ALL perks
+                c.execute('DELETE FROM user_perks WHERE guild_id = ? AND user_id = ?',
+                          (guild_id, user.id))
+                c.execute('DELETE FROM active_perks WHERE guild_id = ? AND user_id = ?',
+                          (guild_id, user.id))
+                c.execute('DELETE FROM pending_perks WHERE guild_id = ? AND user_id = ?',
+                          (guild_id, user.id))
 
-            conn.commit()
-            conn.close()
+                conn.commit()
+            finally:
+                conn.close()
 
             embed = discord.Embed(
                 title="✅ Dragon Nest Perks Reset",
@@ -232,31 +238,33 @@ async def handle_dev_command(message, command, args):
 
         user = message.mentions[0]
         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
-        c = conn.cursor()
+        try:
+            c = conn.cursor()
 
-        # Get inventory info before reset
-        c.execute('SELECT SUM(count) FROM user_dragons WHERE guild_id = ? AND user_id = ?',
-                  (guild_id, user.id))
-        total_dragons = c.fetchone()[0] or 0
+            # Get inventory info before reset
+            c.execute('SELECT SUM(count) FROM user_dragons WHERE guild_id = ? AND user_id = ?',
+                      (guild_id, user.id))
+            total_dragons = c.fetchone()[0] or 0
 
-        c.execute('SELECT coins FROM users WHERE guild_id = ? AND user_id = ?',
-                  (guild_id, user.id))
-        user_coins = c.fetchone()[0] if c.fetchone() else 0
+            c.execute('SELECT coins FROM users WHERE guild_id = ? AND user_id = ?',
+                      (guild_id, user.id))
+            user_coins = c.fetchone()[0] if c.fetchone() else 0
 
-        # Reset all dragons
-        c.execute('DELETE FROM user_dragons WHERE guild_id = ? AND user_id = ?',
-                  (guild_id, user.id))
+            # Reset all dragons
+            c.execute('DELETE FROM user_dragons WHERE guild_id = ? AND user_id = ?',
+                      (guild_id, user.id))
 
-        # Reset coins to 0
-        c.execute('UPDATE users SET coins = 0 WHERE guild_id = ? AND user_id = ?',
-                  (guild_id, user.id))
+            # Reset coins to 0
+            c.execute('UPDATE users SET coins = 0 WHERE guild_id = ? AND user_id = ?',
+                      (guild_id, user.id))
 
-        # Reset packs
-        c.execute('DELETE FROM user_packs WHERE guild_id = ? AND user_id = ?',
-                  (guild_id, user.id))
+            # Reset packs
+            c.execute('DELETE FROM user_packs WHERE guild_id = ? AND user_id = ?',
+                      (guild_id, user.id))
 
-        conn.commit()
-        conn.close()
+            conn.commit()
+        finally:
+            conn.close()
 
         embed = discord.Embed(
             title="✅ Inventory Reset Successfully",
@@ -339,106 +347,109 @@ async def handle_dev_command(message, command, args):
                 return
 
         current_time = int(time.time())
+
+        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        try:
+            c = conn.cursor()
+
+            c.execute('DELETE FROM raid_bosses WHERE guild_id = ?', (guild_id,))
+            c.execute('DELETE FROM raid_damage WHERE guild_id = ?', (guild_id,))
+
+            c.execute('''SELECT user_id FROM user_dragons
+                         WHERE guild_id = ? AND count > 0''', (guild_id,))
+            player_ids = [row[0] for row in c.fetchall()]
+            active_players = len(set(player_ids)) or 1
+
+            total_potential_damage = 0
+            total_dragons_count = 0
+            for player_id in set(player_ids):
+                c.execute('SELECT dragon_type, count FROM user_dragons WHERE guild_id = ? AND user_id = ? AND count > 0',
+                         (guild_id, player_id))
+                user_dragons_list = c.fetchall()
+
+                player_potential = 0
+                for dragon_type, count in user_dragons_list:
+                    total_dragons_count += count
+                    dragon_rarity = 'common'
+                    for rarity, dragons in DRAGON_RARITY_TIERS.items():
+                        if dragon_type in dragons:
+                            dragon_rarity = rarity
+                            break
+
+                    from state import RARITY_DAMAGE
+                    damage_per_dragon = RARITY_DAMAGE[dragon_rarity]
+                    player_potential += count * damage_per_dragon
+
+                total_potential_damage += player_potential
+
+            avg_damage_per_player = total_potential_damage / active_players if active_players > 0 else 1500
+
+            boss_rarities = ['epic', 'legendary', 'mythic', 'ultra']
+            boss_rarity = random.choices(boss_rarities, weights=[50, 30, 15, 5])[0]
+
+            rarity_attack_targets = {
+                'epic': 4,
+                'legendary': 6,
+                'mythic': 8,
+                'ultra': 10
+            }
+
+            attacks_needed = rarity_attack_targets[boss_rarity]
+
+            if active_players == 1:
+                player_multiplier = 0.8
+            elif active_players == 2:
+                player_multiplier = 1.0
+            elif active_players <= 5:
+                player_multiplier = 1.0 + (active_players - 2) * 0.2
+            else:
+                player_multiplier = 1.6
+
+            base_hp = int(avg_damage_per_player * attacks_needed * player_multiplier)
+
+            easy_hp = int(base_hp * 3.0)
+            normal_hp = int(base_hp * 4.0)
+            hard_hp = int(base_hp * 6.0)
+
+            hp_limits = {
+                'epic': (20000, 100000),
+                'legendary': (40000, 200000),
+                'mythic': (150000, 300000),
+                'ultra': (300000, 800000)
+            }
+
+            min_hp, max_hp = hp_limits[boss_rarity]
+            easy_hp = max(min_hp // 2, min(easy_hp, max_hp // 3))
+            normal_hp = max(min_hp, min(normal_hp, max_hp // 2))
+            hard_hp = max(int(min_hp * 2), min(hard_hp, max_hp))
+
+            boss_names = {
+                'epic': ['Ancient Wyrm', 'Iron Goliath', 'Storm Titan', 'Frost Giant'],
+                'legendary': ['Emerald Overlord', 'Diamond Behemoth', 'Obsidian Terror'],
+                'mythic': ['Golden Sovereign', 'Platinum Destroyer', 'Crystal Devourer'],
+                'ultra': ['Celestial Avatar', 'Void Incarnate', 'Cosmic Leviathan', 'Primordial Nightmare']
+            }
+
+            boss_name = random.choice(boss_names[boss_rarity])
+            reward_dragons = DRAGON_RARITY_TIERS[boss_rarity]
+            reward_dragon = random.choice(reward_dragons)
+
+            c.execute('''INSERT INTO raid_bosses (guild_id, boss_name, easy_hp, easy_max_hp, normal_hp, normal_max_hp, hard_hp, hard_max_hp,
+                                                 boss_rarity, reward_dragon, started_at, expires_at, easy_participants, normal_participants, hard_participants)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                      (guild_id, boss_name, easy_hp, easy_hp, normal_hp, normal_hp, hard_hp, hard_hp,
+                       boss_rarity, reward_dragon, current_time, current_time + (hours * 60 * 60), '[]', '[]', '[]'))
+
+            conn.commit()
+        finally:
+            conn.close()
+
         raid_boss_active[guild_id] = {
             'active': True,
             'spawn_time': current_time,
             'despawn_time': current_time + (hours * 60 * 60),
             'manual_spawn': True
         }
-
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
-        c = conn.cursor()
-
-        c.execute('DELETE FROM raid_bosses WHERE guild_id = ?', (guild_id,))
-        c.execute('DELETE FROM raid_damage WHERE guild_id = ?', (guild_id,))
-
-        c.execute('''SELECT user_id FROM user_dragons
-                     WHERE guild_id = ? AND count > 0''', (guild_id,))
-        player_ids = [row[0] for row in c.fetchall()]
-        active_players = len(set(player_ids)) or 1
-
-        total_potential_damage = 0
-        total_dragons_count = 0
-        for player_id in set(player_ids):
-            c.execute('SELECT dragon_type, count FROM user_dragons WHERE guild_id = ? AND user_id = ? AND count > 0',
-                     (guild_id, player_id))
-            user_dragons_list = c.fetchall()
-
-            player_potential = 0
-            for dragon_type, count in user_dragons_list:
-                total_dragons_count += count
-                dragon_rarity = 'common'
-                for rarity, dragons in DRAGON_RARITY_TIERS.items():
-                    if dragon_type in dragons:
-                        dragon_rarity = rarity
-                        break
-
-                from state import RARITY_DAMAGE
-                damage_per_dragon = RARITY_DAMAGE[dragon_rarity]
-                player_potential += count * damage_per_dragon
-
-            total_potential_damage += player_potential
-
-        avg_damage_per_player = total_potential_damage / active_players if active_players > 0 else 1500
-
-        boss_rarities = ['epic', 'legendary', 'mythic', 'ultra']
-        boss_rarity = random.choices(boss_rarities, weights=[50, 30, 15, 5])[0]
-
-        rarity_attack_targets = {
-            'epic': 4,
-            'legendary': 6,
-            'mythic': 8,
-            'ultra': 10
-        }
-
-        attacks_needed = rarity_attack_targets[boss_rarity]
-
-        if active_players == 1:
-            player_multiplier = 0.8
-        elif active_players == 2:
-            player_multiplier = 1.0
-        elif active_players <= 5:
-            player_multiplier = 1.0 + (active_players - 2) * 0.2
-        else:
-            player_multiplier = 1.6
-
-        base_hp = int(avg_damage_per_player * attacks_needed * player_multiplier)
-
-        easy_hp = int(base_hp * 3.0)
-        normal_hp = int(base_hp * 4.0)
-        hard_hp = int(base_hp * 6.0)
-
-        hp_limits = {
-            'epic': (20000, 100000),
-            'legendary': (40000, 200000),
-            'mythic': (150000, 300000),
-            'ultra': (300000, 800000)
-        }
-
-        min_hp, max_hp = hp_limits[boss_rarity]
-        easy_hp = max(min_hp // 2, min(easy_hp, max_hp // 3))
-        normal_hp = max(min_hp, min(normal_hp, max_hp // 2))
-        hard_hp = max(int(min_hp * 2), min(hard_hp, max_hp))
-
-        boss_names = {
-            'epic': ['Ancient Wyrm', 'Iron Goliath', 'Storm Titan', 'Frost Giant'],
-            'legendary': ['Emerald Overlord', 'Diamond Behemoth', 'Obsidian Terror'],
-            'mythic': ['Golden Sovereign', 'Platinum Destroyer', 'Crystal Devourer'],
-            'ultra': ['Celestial Avatar', 'Void Incarnate', 'Cosmic Leviathan', 'Primordial Nightmare']
-        }
-
-        boss_name = random.choice(boss_names[boss_rarity])
-        reward_dragons = DRAGON_RARITY_TIERS[boss_rarity]
-        reward_dragon = random.choice(reward_dragons)
-
-        c.execute('''INSERT INTO raid_bosses (guild_id, boss_name, easy_hp, easy_max_hp, normal_hp, normal_max_hp, hard_hp, hard_max_hp,
-                                             boss_rarity, reward_dragon, started_at, expires_at, easy_participants, normal_participants, hard_participants)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                  (guild_id, boss_name, easy_hp, easy_hp, normal_hp, normal_hp, hard_hp, hard_hp,
-                   boss_rarity, reward_dragon, current_time, current_time + (hours * 60 * 60), '[]', '[]', '[]'))
-
-        conn.commit()
-        conn.close()
 
         dragon_data = DRAGON_TYPES[reward_dragon]
 
@@ -935,41 +946,43 @@ async def handle_dev_command(message, command, args):
             return
 
         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
-        c = conn.cursor()
+        try:
+            c = conn.cursor()
 
-        c.execute('SELECT COUNT(*) FROM users WHERE guild_id = ?', (guild_id,))
-        user_count = c.fetchone()[0]
+            c.execute('SELECT COUNT(*) FROM users WHERE guild_id = ?', (guild_id,))
+            user_count = c.fetchone()[0]
 
-        c.execute('SELECT SUM(count) FROM user_dragons WHERE guild_id = ?', (guild_id,))
-        dragon_count = c.fetchone()[0] or 0
+            c.execute('SELECT SUM(count) FROM user_dragons WHERE guild_id = ?', (guild_id,))
+            dragon_count = c.fetchone()[0] or 0
 
-        c.execute('SELECT SUM(count) FROM user_items WHERE guild_id = ?', (guild_id,))
-        item_count = c.fetchone()[0] or 0
+            c.execute('SELECT SUM(count) FROM user_items WHERE guild_id = ?', (guild_id,))
+            item_count = c.fetchone()[0] or 0
 
-        c.execute('SELECT COUNT(*) FROM user_alphas WHERE guild_id = ?', (guild_id,))
-        alpha_count = c.fetchone()[0]
+            c.execute('SELECT COUNT(*) FROM user_alphas WHERE guild_id = ?', (guild_id,))
+            alpha_count = c.fetchone()[0]
 
-        tables_to_wipe = [
-            'users', 'user_dragons', 'user_alphas', 'user_items', 'user_packs',
-            'user_perks', 'active_perks', 'user_luckycharms', 'dragonscales',
-            'user_bingo', 'battlepass_progress', 'dragon_nest', 'bounty_progress',
-            'breeding_log', 'user_discoveries', 'dragonpass'
-        ]
+            tables_to_wipe = [
+                'users', 'user_dragons', 'user_alphas', 'user_items', 'user_packs',
+                'user_perks', 'active_perks', 'user_luckycharms', 'dragonscales',
+                'user_bingo', 'battlepass_progress', 'dragon_nest', 'bounty_progress',
+                'breeding_log', 'user_discoveries', 'dragonpass'
+            ]
 
-        for table in tables_to_wipe:
-            try:
-                c.execute(f'DELETE FROM {table} WHERE guild_id = ?', (guild_id,))
-            except:
-                pass
+            for table in tables_to_wipe:
+                try:
+                    c.execute(f'DELETE FROM {table} WHERE guild_id = ?', (guild_id,))
+                except:
+                    pass
 
-        for key_dict in [active_dragonfest, active_dragonscales, raid_boss_active,
-                         active_luckycharms, active_usable_items, spawn_channels,
-                         premium_users, last_spawn_data]:
-            if guild_id in key_dict:
-                del key_dict[guild_id]
+            for key_dict in [active_dragonfest, active_dragonscales, raid_boss_active,
+                             active_luckycharms, active_usable_items, spawn_channels,
+                             premium_users, last_spawn_data]:
+                if guild_id in key_dict:
+                    del key_dict[guild_id]
 
-        conn.commit()
-        conn.close()
+            conn.commit()
+        finally:
+            conn.close()
 
         embed = discord.Embed(
             title="🧹 SERVER WIPE COMPLETE",
@@ -1074,14 +1087,16 @@ async def handle_dev_command(message, command, args):
             return
 
         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
-        c = conn.cursor()
-        c.execute('''INSERT INTO user_packs (guild_id, user_id, pack_type, count)
-                     VALUES (?, ?, ?, ?)
-                     ON CONFLICT(guild_id, user_id, pack_type)
-                     DO UPDATE SET count = count + ?''',
-                  (guild_id_int, user_id_int, pack_type, amount, amount))
-        conn.commit()
-        conn.close()
+        try:
+            c = conn.cursor()
+            c.execute('''INSERT INTO user_packs (guild_id, user_id, pack_type, count)
+                         VALUES (?, ?, ?, ?)
+                         ON CONFLICT(guild_id, user_id, pack_type)
+                         DO UPDATE SET count = count + ?''',
+                      (guild_id_int, user_id_int, pack_type, amount, amount))
+            conn.commit()
+        finally:
+            conn.close()
 
         pack_data = PACK_TYPES[pack_type]
         await message.channel.send(f"✅ Gave {amount}x {pack_data['emoji']} {pack_data['name']} to <@{user_id_int}> in Guild {guild_id_int}!")
@@ -1115,12 +1130,14 @@ async def handle_dev_command(message, command, args):
         premium_end = current_time + (days * 86400)
 
         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
-        c = conn.cursor()
-        c.execute('''INSERT OR REPLACE INTO premium_users (guild_id, user_id, premium_until)
-                     VALUES (?, ?, ?)''',
-                  (guild_id_int, user_id_int, premium_end))
-        conn.commit()
-        conn.close()
+        try:
+            c = conn.cursor()
+            c.execute('''INSERT OR REPLACE INTO premium_users (guild_id, user_id, premium_until)
+                         VALUES (?, ?, ?)''',
+                      (guild_id_int, user_id_int, premium_end))
+            conn.commit()
+        finally:
+            conn.close()
 
         if guild_id_int not in premium_users:
             premium_users[guild_id_int] = {}
@@ -1222,12 +1239,14 @@ async def handle_dev_command(message, command, args):
     # -db resetquests
     if command == 'resetquests':
         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
-        c = conn.cursor()
-        current_time = int(time.time())
-        c.execute('UPDATE dragonpass SET quests_active = NULL, quest_refresh_time = ? WHERE guild_id = ?', (current_time + 43200, guild_id))
-        affected = c.rowcount
-        conn.commit()
-        conn.close()
+        try:
+            c = conn.cursor()
+            current_time = int(time.time())
+            c.execute('UPDATE dragonpass SET quests_active = NULL, quest_refresh_time = ? WHERE guild_id = ?', (current_time + 43200, guild_id))
+            affected = c.rowcount
+            conn.commit()
+        finally:
+            conn.close()
 
         await message.channel.send(f"✅ Reset quests for **{affected}** users in this server! New quests will generate on next `/dragonpass` use.")
         return
@@ -1247,11 +1266,13 @@ async def handle_dev_command(message, command, args):
     # -db resetbingo
     if command == 'resetbingo':
         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
-        c = conn.cursor()
-        c.execute('DELETE FROM bingo_cards WHERE guild_id = ?', (guild_id,))
-        deleted_count = c.rowcount
-        conn.commit()
-        conn.close()
+        try:
+            c = conn.cursor()
+            c.execute('DELETE FROM bingo_cards WHERE guild_id = ?', (guild_id,))
+            deleted_count = c.rowcount
+            conn.commit()
+        finally:
+            conn.close()
 
         embed = discord.Embed(
             title="✅ Bingo Reset Complete!",
@@ -1372,9 +1393,18 @@ async def handle_dev_command(message, command, args):
 
         boss_name, rarity, easy_hp, easy_max_hp, normal_hp, normal_max_hp, hard_hp, hard_max_hp, easy_part, normal_part, hard_part, expires_at = raid_data
 
-        easy_participants = len(eval(easy_part)) if easy_part else 0
-        normal_participants = len(eval(normal_part)) if normal_part else 0
-        hard_participants = len(eval(hard_part)) if hard_part else 0
+        try:
+            easy_participants = len(json.loads(easy_part)) if easy_part else 0
+        except (ValueError, TypeError):
+            easy_participants = 0
+        try:
+            normal_participants = len(json.loads(normal_part)) if normal_part else 0
+        except (ValueError, TypeError):
+            normal_participants = 0
+        try:
+            hard_participants = len(json.loads(hard_part)) if hard_part else 0
+        except (ValueError, TypeError):
+            hard_participants = 0
 
         time_left = expires_at - int(time.time())
         hours = max(0, time_left // 3600)
@@ -1396,23 +1426,24 @@ async def handle_dev_command(message, command, args):
     # -db raidkill
     if command == 'raidkill':
         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
-        c = conn.cursor()
+        try:
+            c = conn.cursor()
 
-        c.execute('SELECT boss_name FROM raid_bosses WHERE guild_id = ?', (guild_id,))
-        raid_data = c.fetchone()
+            c.execute('SELECT boss_name FROM raid_bosses WHERE guild_id = ?', (guild_id,))
+            raid_data = c.fetchone()
 
-        if not raid_data:
+            if not raid_data:
+                await message.channel.send("❌ No active raid boss!")
+                return
+
+            boss_name = raid_data[0]
+
+            c.execute('UPDATE raid_bosses SET easy_hp = 0, normal_hp = 0, hard_hp = 0 WHERE guild_id = ?', (guild_id,))
+            c.execute('DELETE FROM raid_bosses WHERE guild_id = ?', (guild_id,))
+            c.execute('DELETE FROM raid_damage WHERE guild_id = ?', (guild_id,))
+            conn.commit()
+        finally:
             conn.close()
-            await message.channel.send("❌ No active raid boss!")
-            return
-
-        boss_name = raid_data[0]
-
-        c.execute('UPDATE raid_bosses SET easy_hp = 0, normal_hp = 0, hard_hp = 0 WHERE guild_id = ?', (guild_id,))
-        c.execute('DELETE FROM raid_bosses WHERE guild_id = ?', (guild_id,))
-        c.execute('DELETE FROM raid_damage WHERE guild_id = ?', (guild_id,))
-        conn.commit()
-        conn.close()
 
         if guild_id in raid_boss_active:
             del raid_boss_active[guild_id]

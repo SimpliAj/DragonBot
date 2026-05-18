@@ -3,6 +3,7 @@ cogs/tasks.py - All @tasks.loop background tasks as TasksCog.
 Extracted verbatim from bot.py.
 """
 
+import ast
 import asyncio
 import datetime
 import json
@@ -113,6 +114,10 @@ class TasksCog(commands.Cog):
         self.process_breeding_queue.cancel()
         self.process_adventures.cancel()
         self.cleanup_stuck_sessions.cancel()
+        self.setup_reminder.cancel()
+        self.vote_reminder_task.cancel()
+        self.vote_streak_reset_task.cancel()
+        self.vote_reminder_deadline_task.cancel()
 
     # ==================== CLEANUP LOCKS TASK ====================
     @tasks.loop(minutes=30)
@@ -134,6 +139,11 @@ class TasksCog(commands.Cog):
                     del last_catch_attempts[guild_id]
         except Exception as e:
             logger.error(f"Lock cleanup error: {e}")
+
+    @cleanup_locks_task.error
+    async def on_cleanup_locks_task_error(self, error):
+        logger.error(f"cleanup_locks_task crashed, restarting: {error}", exc_info=True)
+        self.cleanup_locks_task.restart()
 
     @cleanup_locks_task.before_loop
     async def before_cleanup_locks(self):
@@ -347,9 +357,9 @@ class TasksCog(commands.Cog):
 
                                 if participants_row:
                                     easy_part_str, normal_part_str, hard_part_str = participants_row
-                                    easy_joined = bool(eval(easy_part_str)) if easy_part_str else False
-                                    normal_joined = bool(eval(normal_part_str)) if normal_part_str else False
-                                    hard_joined = bool(eval(hard_part_str)) if hard_part_str else False
+                                    easy_joined = bool(ast.literal_eval(easy_part_str)) if easy_part_str else False
+                                    normal_joined = bool(ast.literal_eval(normal_part_str)) if normal_part_str else False
+                                    hard_joined = bool(ast.literal_eval(hard_part_str)) if hard_part_str else False
 
                                     # If NO ONE joined any tier, despawn the raid
                                     if not (easy_joined or normal_joined or hard_joined):
@@ -390,11 +400,11 @@ class TasksCog(commands.Cog):
 
                                     # Check which tiers are still alive (not defeated)
                                     escaped_tiers = []
-                                    if easy_hp > 0 and bool(eval(easy_part_str) if easy_part_str else False):
+                                    if easy_hp > 0 and bool(ast.literal_eval(easy_part_str) if easy_part_str else False):
                                         escaped_tiers.append('easy')
-                                    if normal_hp > 0 and bool(eval(normal_part_str) if normal_part_str else False):
+                                    if normal_hp > 0 and bool(ast.literal_eval(normal_part_str) if normal_part_str else False):
                                         escaped_tiers.append('normal')
-                                    if hard_hp > 0 and bool(eval(hard_part_str) if hard_part_str else False):
+                                    if hard_hp > 0 and bool(ast.literal_eval(hard_part_str) if hard_part_str else False):
                                         escaped_tiers.append('hard')
 
                                     # Send escape message for undefeated tiers + Shield Rune consolation
@@ -456,6 +466,11 @@ class TasksCog(commands.Cog):
 
         except Exception as e:
             print(f"❌ Critical error in auto_manage_raid_bosses: {e}")
+
+    @auto_manage_raid_bosses.error
+    async def on_auto_manage_raid_bosses_error(self, error):
+        logger.error(f"auto_manage_raid_bosses crashed, restarting: {error}", exc_info=True)
+        self.auto_manage_raid_bosses.restart()
 
     @auto_manage_raid_bosses.before_loop
     async def before_auto_manage_raid_bosses(self):
@@ -571,6 +586,11 @@ class TasksCog(commands.Cog):
                 if conn:
                     conn.close()
 
+    @auto_spawn_dragons.error
+    async def on_auto_spawn_dragons_error(self, error):
+        logger.error(f"auto_spawn_dragons crashed, restarting: {error}", exc_info=True)
+        self.auto_spawn_dragons.restart()
+
     @auto_spawn_dragons.before_loop
     async def before_auto_spawn_dragons(self):
         await self.bot.wait_until_ready()
@@ -682,6 +702,11 @@ class TasksCog(commands.Cog):
         finally:
             if conn:
                 conn.close()
+
+    @check_dragon_nest_expiry.error
+    async def on_check_dragon_nest_expiry_error(self, error):
+        logger.error(f"check_dragon_nest_expiry crashed, restarting: {error}", exc_info=True)
+        self.check_dragon_nest_expiry.restart()
 
     @check_dragon_nest_expiry.before_loop
     async def before_check_dragon_nest_expiry(self):
@@ -806,6 +831,11 @@ class TasksCog(commands.Cog):
         finally:
             if conn:
                 conn.close()
+
+    @check_dragonfest_expiry.error
+    async def on_check_dragonfest_expiry_error(self, error):
+        logger.error(f"check_dragonfest_expiry crashed, restarting: {error}", exc_info=True)
+        self.check_dragonfest_expiry.restart()
 
     @check_dragonfest_expiry.before_loop
     async def before_check_dragonfest_expiry(self):
@@ -949,6 +979,11 @@ class TasksCog(commands.Cog):
             if conn:
                 conn.close()
 
+    @check_dragonscale_expiry.error
+    async def on_check_dragonscale_expiry_error(self, error):
+        logger.error(f"check_dragonscale_expiry crashed, restarting: {error}", exc_info=True)
+        self.check_dragonscale_expiry.restart()
+
     @check_dragonscale_expiry.before_loop
     async def before_check_dragonscale_expiry(self):
         await self.bot.wait_until_ready()
@@ -978,6 +1013,11 @@ class TasksCog(commands.Cog):
 
         except Exception as e:
             print(f"Error in check_lucky_charm_expiry: {e}")
+
+    @check_lucky_charm_expiry.error
+    async def on_check_lucky_charm_expiry_error(self, error):
+        logger.error(f"check_lucky_charm_expiry crashed, restarting: {error}", exc_info=True)
+        self.check_lucky_charm_expiry.restart()
 
     @check_lucky_charm_expiry.before_loop
     async def before_check_lucky_charm_expiry(self):
@@ -1105,6 +1145,7 @@ class TasksCog(commands.Cog):
                     )
                     embed.set_footer(text="💎 Limited quantities - first come, first served!")
 
+                    bot_ref = self.bot
                     class BlackMarketAnnounceView(discord.ui.View):
                         def __init__(self_inner):
                             super().__init__(timeout=None)
@@ -1273,7 +1314,7 @@ class TasksCog(commands.Cog):
                                     # Update the main announcement embed with new stock
                                     if black_market_active[gid]['message_id']:
                                         try:
-                                            guild_obj = self.bot.get_guild(gid) if hasattr(self, 'bot') else None
+                                            guild_obj = bot_ref.get_guild(gid)
                                             if guild_obj:
                                                 for ch in guild_obj.text_channels:
                                                     try:
@@ -1361,8 +1402,6 @@ class TasksCog(commands.Cog):
     @tasks.loop(minutes=1)
     async def process_breeding_queue(self):
         """Process queued breedings every minute - starts when cooldown is ready"""
-        current_time = int(time.time())
-
         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
         c = conn.cursor()
 
@@ -1380,6 +1419,7 @@ class TasksCog(commands.Cog):
 
         for queue_id, guild_id, user_id, parent1, parent2 in all_breedings:
             try:
+                current_time = int(time.time())
                 # NORMALIZE dragon types from DB
                 parent1 = normalize_dragon_type(parent1)
                 parent2 = normalize_dragon_type(parent2)
@@ -1741,12 +1781,15 @@ class TasksCog(commands.Cog):
 
         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
         c = conn.cursor()
-
-        # Get all completed adventures that haven't been claimed
-        c.execute('''SELECT adventure_id, guild_id, user_id, dragons_sent, adventure_type, returns_at, double_loot
-                     FROM user_adventures
-                     WHERE status = 'active' AND returns_at <= ? AND claimed = 0''', (current_time,))
-        completed = c.fetchall()
+        try:
+            c.execute('''SELECT adventure_id, guild_id, user_id, dragons_sent, adventure_type, returns_at, double_loot
+                         FROM user_adventures
+                         WHERE status = 'active' AND returns_at <= ? AND claimed = 0''', (current_time,))
+            completed = c.fetchall()
+        except Exception as e:
+            logger.error(f"process_adventures_sync initial query failed: {e}", exc_info=True)
+            conn.close()
+            return dms_to_send
 
         for adventure_id, guild_id, user_id, dragons_json, adv_type, returns_at, double_loot in completed:
             try:
@@ -1950,6 +1993,11 @@ class TasksCog(commands.Cog):
         conn.close()
         return dms_to_send
 
+    @process_adventures.error
+    async def on_process_adventures_error(self, error):
+        logger.error(f"process_adventures crashed, restarting: {error}", exc_info=True)
+        self.process_adventures.restart()
+
     @process_adventures.before_loop
     async def before_process_adventures(self):
         await self.bot.wait_until_ready()
@@ -1972,6 +2020,11 @@ class TasksCog(commands.Cog):
 
         if expired_sessions:
             print(f"Cleaned up {len(expired_sessions)} stuck breeding sessions")
+
+    @cleanup_stuck_sessions.error
+    async def on_cleanup_stuck_sessions_error(self, error):
+        logger.error(f"cleanup_stuck_sessions crashed, restarting: {error}", exc_info=True)
+        self.cleanup_stuck_sessions.restart()
 
     @cleanup_stuck_sessions.before_loop
     async def before_cleanup_stuck_sessions(self):
@@ -2030,6 +2083,11 @@ class TasksCog(commands.Cog):
                 except Exception:
                     pass
 
+    @setup_reminder.error
+    async def on_setup_reminder_error(self, error):
+        logger.error(f"setup_reminder crashed, restarting: {error}", exc_info=True)
+        self.setup_reminder.restart()
+
     @setup_reminder.before_loop
     async def before_setup_reminder(self):
         await self.bot.wait_until_ready()
@@ -2041,57 +2099,69 @@ class TasksCog(commands.Cog):
     @tasks.loop(time=datetime.time(20, 0, tzinfo=ZoneInfo('Europe/Vienna')))
     async def vote_reminder_task(self):
         """DM users with active streak who haven't voted today (runs at 20:00 Vienna)."""
-        today = datetime.datetime.now(self._VIENNA).date()
-        today_midnight_ts = int(datetime.datetime.combine(
-            today, datetime.time(0, 0), tzinfo=self._VIENNA
-        ).timestamp())
-        today_str = today.isoformat()
+        try:
+            today = datetime.datetime.now(self._VIENNA).date()
+            today_midnight_ts = int(datetime.datetime.combine(
+                today, datetime.time(0, 0), tzinfo=self._VIENNA
+            ).timestamp())
+            today_str = today.isoformat()
 
-        conn = get_db_connection()
-        c = conn.cursor()
-        c.execute(
-            '''SELECT user_id, current_streak, total_votes FROM vote_streaks
-               WHERE current_streak > 0
-               AND last_vote_time < ?
-               AND (last_reminder_date IS NULL OR last_reminder_date != ?)''',
-            (today_midnight_ts, today_str)
-        )
-        rows = c.fetchall()
-        conn.close()
-
-        for user_id, streak, total_votes in rows:
-            member = None
-            for guild in self.bot.guilds:
-                member = guild.get_member(user_id)
-                if member:
-                    break
-            if not member:
-                continue
-
-            day_in_cycle = ((total_votes) % 30) + 1
-
-            embed = discord.Embed(
-                title="⏰ Don't forget to vote!",
-                description=(
-                    f"You haven't voted today yet!\n"
-                    f'**Day {day_in_cycle}/30** in your current cycle — **{streak}-day streak** is at risk! 🔥\n\n'
-                    f'[➡️ Vote now]({self._TOPGG_VOTE_URL})'
-                ),
-                color=discord.Color.orange(),
-            )
-            embed.set_footer(text="You have 4 hours after this reminder to vote or your streak resets!")
-
+            conn = get_db_connection()
             try:
-                await member.send(embed=embed)
-                conn = get_db_connection()
-                conn.execute(
-                    'UPDATE vote_streaks SET last_reminder_date = ?, reminder_sent_at = ? WHERE user_id = ?',
-                    (today_str, int(time.time()), user_id)
+                c = conn.cursor()
+                c.execute(
+                    '''SELECT user_id, current_streak, total_votes FROM vote_streaks
+                       WHERE current_streak > 0
+                       AND last_vote_time < ?
+                       AND (last_reminder_date IS NULL OR last_reminder_date != ?)''',
+                    (today_midnight_ts, today_str)
                 )
-                conn.commit()
+                rows = c.fetchall()
+            finally:
                 conn.close()
-            except Exception:
-                pass
+
+            for user_id, streak, total_votes in rows:
+                member = None
+                for guild in self.bot.guilds:
+                    member = guild.get_member(user_id)
+                    if member:
+                        break
+                if not member:
+                    continue
+
+                day_in_cycle = ((total_votes) % 30) + 1
+
+                embed = discord.Embed(
+                    title="⏰ Don't forget to vote!",
+                    description=(
+                        f"You haven't voted today yet!\n"
+                        f'**Day {day_in_cycle}/30** in your current cycle — **{streak}-day streak** is at risk! 🔥\n\n'
+                        f'[➡️ Vote now]({self._TOPGG_VOTE_URL})'
+                    ),
+                    color=discord.Color.orange(),
+                )
+                embed.set_footer(text="You have 4 hours after this reminder to vote or your streak resets!")
+
+                try:
+                    await member.send(embed=embed)
+                    conn2 = get_db_connection()
+                    try:
+                        conn2.execute(
+                            'UPDATE vote_streaks SET last_reminder_date = ?, reminder_sent_at = ? WHERE user_id = ?',
+                            (today_str, int(time.time()), user_id)
+                        )
+                        conn2.commit()
+                    finally:
+                        conn2.close()
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.error(f"vote_reminder_task error: {e}", exc_info=True)
+
+    @vote_reminder_task.error
+    async def on_vote_reminder_task_error(self, error):
+        logger.error(f"vote_reminder_task crashed, restarting: {error}", exc_info=True)
+        self.vote_reminder_task.restart()
 
     @vote_reminder_task.before_loop
     async def before_vote_reminder_task(self):
@@ -2137,25 +2207,36 @@ class TasksCog(commands.Cog):
     @tasks.loop(minutes=5)
     async def vote_reminder_deadline_task(self):
         """Reset streak for users who didn't vote within 4h of their reminder DM."""
-        now = int(time.time())
-        deadline = now - 4 * 3600  # 4 hours ago
+        conn = None
+        try:
+            now = int(time.time())
+            deadline = now - 4 * 3600  # 4 hours ago
 
-        conn = get_db_connection()
-        c = conn.cursor()
-        c.execute(
-            '''UPDATE vote_streaks SET current_streak = 0, reminder_sent_at = NULL
-               WHERE current_streak > 0
-               AND reminder_sent_at IS NOT NULL
-               AND reminder_sent_at < ?
-               AND last_vote_time < reminder_sent_at''',
-            (deadline,)
-        )
-        affected = c.rowcount
-        conn.commit()
-        conn.close()
+            conn = get_db_connection()
+            c = conn.cursor()
+            c.execute(
+                '''UPDATE vote_streaks SET current_streak = 0, reminder_sent_at = NULL
+                   WHERE current_streak > 0
+                   AND reminder_sent_at IS NOT NULL
+                   AND reminder_sent_at < ?
+                   AND last_vote_time < reminder_sent_at''',
+                (deadline,)
+            )
+            affected = c.rowcount
+            conn.commit()
 
-        if affected > 0:
-            logger.info(f'vote_reminder_deadline: {affected} users streak reset after 4h no-vote')
+            if affected > 0:
+                logger.info(f'vote_reminder_deadline: {affected} users streak reset after 4h no-vote')
+        except Exception as e:
+            logger.error(f"vote_reminder_deadline_task error: {e}", exc_info=True)
+        finally:
+            if conn:
+                conn.close()
+
+    @vote_reminder_deadline_task.error
+    async def on_vote_reminder_deadline_task_error(self, error):
+        logger.error(f"vote_reminder_deadline_task crashed, restarting: {error}", exc_info=True)
+        self.vote_reminder_deadline_task.restart()
 
     @vote_reminder_deadline_task.before_loop
     async def before_vote_reminder_deadline_task(self):

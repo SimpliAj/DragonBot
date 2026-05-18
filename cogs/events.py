@@ -4,6 +4,7 @@ Also contains spawn_dragon, update_raid_embed, RaidTierSelectView, RaidAttackVie
 Extracted verbatim from bot.py.
 """
 
+import ast
 import asyncio
 import json
 import random
@@ -117,7 +118,7 @@ async def spawn_dragon(guild_id: int, channel, bot=None, catcher_id: int = None)
         _conn.commit()
         _conn.close()
     except Exception as _e:
-        print(f'[spawn] Failed to persist active spawn: {_e}')
+        logger.error(f'[spawn] Failed to persist active spawn: {_e}')
 
     # Dragon stays until caught (no despawn timer)
 
@@ -127,16 +128,17 @@ async def update_raid_embed(guild_id, channel_id, bot, user_tier=None):
     try:
         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
         c = conn.cursor()
+        try:
+            c.execute('SELECT easy_hp, easy_max_hp, normal_hp, normal_max_hp, hard_hp, hard_max_hp, boss_name, boss_rarity, reward_dragon, expires_at, message_id, easy_participants, normal_participants, hard_participants FROM raid_bosses WHERE guild_id = ?',
+                      (guild_id,))
+            boss_data = c.fetchone()
 
-        c.execute('SELECT easy_hp, easy_max_hp, normal_hp, normal_max_hp, hard_hp, hard_max_hp, boss_name, boss_rarity, reward_dragon, expires_at, message_id, easy_participants, normal_participants, hard_participants FROM raid_bosses WHERE guild_id = ?',
-                  (guild_id,))
-        boss_data = c.fetchone()
+            if not boss_data or not boss_data[10]:  # No message_id stored
+                return
 
-        if not boss_data or not boss_data[10]:  # No message_id stored
+            easy_hp, easy_max_hp, normal_hp, normal_max_hp, hard_hp, hard_max_hp, boss_name, boss_rarity, reward_dragon, expires_at, message_id, easy_part_str, normal_part_str, hard_part_str = boss_data
+        finally:
             conn.close()
-            return
-
-        easy_hp, easy_max_hp, normal_hp, normal_max_hp, hard_hp, hard_max_hp, boss_name, boss_rarity, reward_dragon, expires_at, message_id, easy_part_str, normal_part_str, hard_part_str = boss_data
 
         channel = bot.get_channel(channel_id)
         if channel:
@@ -155,9 +157,9 @@ async def update_raid_embed(guild_id, channel_id, bot, user_tier=None):
                 )
 
                 # Calculate participant counts for each tier
-                easy_participants = len(eval(easy_part_str)) if easy_part_str else 0
-                normal_participants = len(eval(normal_part_str)) if normal_part_str else 0
-                hard_participants = len(eval(hard_part_str)) if hard_part_str else 0
+                easy_participants = len(ast.literal_eval(easy_part_str)) if easy_part_str else 0
+                normal_participants = len(ast.literal_eval(normal_part_str)) if normal_part_str else 0
+                hard_participants = len(ast.literal_eval(hard_part_str)) if hard_part_str else 0
 
                 # Easy tier
                 updated_embed.add_field(
@@ -209,11 +211,9 @@ async def update_raid_embed(guild_id, channel_id, bot, user_tier=None):
 
                 await raid_msg.edit(embed=updated_embed)
             except Exception as e:
-                print(f"Error updating raid embed: {e}")
-
-        conn.close()
+                logger.error(f"Error updating raid embed: {e}")
     except Exception as e:
-        print(f"Error in update_raid_embed: {e}")
+        logger.error(f"Error in update_raid_embed: {e}")
 
 
 class RaidTierSelectView(discord.ui.View):
@@ -238,91 +238,88 @@ class RaidTierSelectView(discord.ui.View):
 
     async def _join_tier(self, btn_interaction: discord.Interaction, tier: str):
         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
-        c = conn.cursor()
+        try:
+            c = conn.cursor()
 
-        c.execute('SELECT tier FROM raid_damage WHERE guild_id = ? AND user_id = ?',
-                 (btn_interaction.guild_id, btn_interaction.user.id))
-        existing = c.fetchone()
+            c.execute('SELECT tier FROM raid_damage WHERE guild_id = ? AND user_id = ?',
+                     (btn_interaction.guild_id, btn_interaction.user.id))
+            existing = c.fetchone()
 
-        if existing:
+            if existing:
+                await btn_interaction.response.send_message(
+                    f"❌ You already joined **{existing[0].upper()}** tier! You cannot change.",
+                    ephemeral=True
+                )
+                return
+
+            c.execute('SELECT dragon_type, count FROM user_dragons WHERE guild_id = ? AND user_id = ? AND count > 0',
+                     (btn_interaction.guild_id, btn_interaction.user.id))
+            user_dragons = c.fetchall()
+
+            if not user_dragons:
+                await btn_interaction.response.send_message(
+                    f"❌ You don't have any dragons! Catch some first.",
+                    ephemeral=True
+                )
+                return
+
+            damage_potential = 0
+            for dragon_type, count in user_dragons:
+                dragon_rarity = 'common'
+                for rarity, dragons in DRAGON_RARITY_TIERS.items():
+                    if dragon_type in dragons:
+                        dragon_rarity = rarity
+                        break
+
+                damage_per_dragon = RARITY_DAMAGE[dragon_rarity]
+                damage_potential += count * damage_per_dragon
+
+            c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
+                     (btn_interaction.guild_id, btn_interaction.user.id, 'precisionstone'))
+            stone_result = c.fetchone()
+            precision_stones = stone_result[0] if stone_result else 0
+            precision_bonus = min(precision_stones * 0.05, 0.30)
+            damage_potential = int(damage_potential * (1 + precision_bonus))
+
+            if tier == 'easy' and damage_potential > 10000:
+                await btn_interaction.response.send_message(
+                    f"❌ Your damage potential is **{damage_potential:,}**! Easy tier is for **0-10,000 damage**.\n"
+                    f"Please join Normal or Hard tier.",
+                    ephemeral=True
+                )
+                return
+            elif tier == 'normal' and (damage_potential < 10000 or damage_potential > 70000):
+                await btn_interaction.response.send_message(
+                    f"❌ Your damage potential is **{damage_potential:,}**! Normal tier is for **10,001-70,000 damage**.\n"
+                    f"Please join an appropriate tier.",
+                    ephemeral=True
+                )
+                return
+            elif tier == 'hard' and damage_potential < 70000:
+                await btn_interaction.response.send_message(
+                    f"❌ Your damage potential is only **{damage_potential:,}**! Hard tier requires **70,000+ damage**.\n"
+                    f"Please join Normal tier.",
+                    ephemeral=True
+                )
+                return
+
+            c.execute('''INSERT INTO raid_damage (guild_id, user_id, tier, damage_dealt, attacks_made, last_attack_time)
+                         VALUES (?, ?, ?, 0, 0, 0)
+                         ON CONFLICT(guild_id, user_id) DO UPDATE SET tier = ?''',
+                     (btn_interaction.guild_id, btn_interaction.user.id, tier, tier))
+
+            c.execute(f'SELECT {tier}_participants FROM raid_bosses WHERE guild_id = ? ORDER BY expires_at DESC LIMIT 1', (btn_interaction.guild_id,))
+            result = c.fetchone()
+            if result:
+                participants = ast.literal_eval(result[0]) if result[0] else []
+                if btn_interaction.user.id not in participants:
+                    participants.append(btn_interaction.user.id)
+                    c.execute(f'UPDATE raid_bosses SET {tier}_participants = ? WHERE guild_id = ? AND expires_at = (SELECT MAX(expires_at) FROM raid_bosses WHERE guild_id = ?)',
+                             (str(participants), btn_interaction.guild_id, btn_interaction.guild_id))
+
+            conn.commit()
+        finally:
             conn.close()
-            await btn_interaction.response.send_message(
-                f"❌ You already joined **{existing[0].upper()}** tier! You cannot change.",
-                ephemeral=True
-            )
-            return
-
-        c.execute('SELECT dragon_type, count FROM user_dragons WHERE guild_id = ? AND user_id = ? AND count > 0',
-                 (btn_interaction.guild_id, btn_interaction.user.id))
-        user_dragons = c.fetchall()
-
-        if not user_dragons:
-            conn.close()
-            await btn_interaction.response.send_message(
-                f"❌ You don't have any dragons! Catch some first.",
-                ephemeral=True
-            )
-            return
-
-        damage_potential = 0
-        for dragon_type, count in user_dragons:
-            dragon_rarity = 'common'
-            for rarity, dragons in DRAGON_RARITY_TIERS.items():
-                if dragon_type in dragons:
-                    dragon_rarity = rarity
-                    break
-
-            damage_per_dragon = RARITY_DAMAGE[dragon_rarity]
-            damage_potential += count * damage_per_dragon
-
-        c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
-                 (btn_interaction.guild_id, btn_interaction.user.id, 'precisionstone'))
-        stone_result = c.fetchone()
-        precision_stones = stone_result[0] if stone_result else 0
-        precision_bonus = min(precision_stones * 0.05, 0.30)
-        damage_potential = int(damage_potential * (1 + precision_bonus))
-
-        if tier == 'easy' and damage_potential > 10000:
-            conn.close()
-            await btn_interaction.response.send_message(
-                f"❌ Your damage potential is **{damage_potential:,}**! Easy tier is for **0-10,000 damage**.\n"
-                f"Please join Normal or Hard tier.",
-                ephemeral=True
-            )
-            return
-        elif tier == 'normal' and (damage_potential < 10000 or damage_potential > 70000):
-            conn.close()
-            await btn_interaction.response.send_message(
-                f"❌ Your damage potential is **{damage_potential:,}**! Normal tier is for **10,001-70,000 damage**.\n"
-                f"Please join an appropriate tier.",
-                ephemeral=True
-            )
-            return
-        elif tier == 'hard' and damage_potential < 70000:
-            conn.close()
-            await btn_interaction.response.send_message(
-                f"❌ Your damage potential is only **{damage_potential:,}**! Hard tier requires **70,000+ damage**.\n"
-                f"Please join Normal tier.",
-                ephemeral=True
-            )
-            return
-
-        c.execute('''INSERT INTO raid_damage (guild_id, user_id, tier, damage_dealt, attacks_made, last_attack_time)
-                     VALUES (?, ?, ?, 0, 0, 0)
-                     ON CONFLICT(guild_id, user_id) DO UPDATE SET tier = ?''',
-                 (btn_interaction.guild_id, btn_interaction.user.id, tier, tier))
-
-        c.execute(f'SELECT {tier}_participants FROM raid_bosses WHERE guild_id = ? ORDER BY expires_at DESC LIMIT 1', (btn_interaction.guild_id,))
-        result = c.fetchone()
-        if result:
-            participants = eval(result[0]) if result[0] else []
-            if btn_interaction.user.id not in participants:
-                participants.append(btn_interaction.user.id)
-                c.execute(f'UPDATE raid_bosses SET {tier}_participants = ? WHERE guild_id = ? AND expires_at = (SELECT MAX(expires_at) FROM raid_bosses WHERE guild_id = ?)',
-                         (str(participants), btn_interaction.guild_id, btn_interaction.guild_id))
-
-        conn.commit()
-        conn.close()
 
         # Update main raid embed with new participant count
         await update_raid_embed(btn_interaction.guild_id, btn_interaction.channel_id, btn_interaction.client)
@@ -347,483 +344,481 @@ class RaidAttackView(discord.ui.View):
 
         conn_a = sqlite3.connect('dragon_bot.db', timeout=120.0)
         c_a = conn_a.cursor()
+        try:
+            c_a.execute('SELECT tier FROM raid_damage WHERE guild_id = ? AND user_id = ?',
+                      (btn_interaction.guild_id, btn_interaction.user.id))
+            tier_result = c_a.fetchone()
 
-        c_a.execute('SELECT tier FROM raid_damage WHERE guild_id = ? AND user_id = ?',
-                  (btn_interaction.guild_id, btn_interaction.user.id))
-        tier_result = c_a.fetchone()
+            c_a.execute('''SELECT easy_max_hp, hard_max_hp, normal_max_hp FROM raid_bosses
+                           WHERE guild_id = ?''', (btn_interaction.guild_id,))
+            raid_type_result = c_a.fetchone()
 
-        c_a.execute('''SELECT easy_max_hp, hard_max_hp, normal_max_hp FROM raid_bosses
-                       WHERE guild_id = ?''', (btn_interaction.guild_id,))
-        raid_type_result = c_a.fetchone()
+            if not raid_type_result:
+                await btn_interaction.response.send_message("❌ No active raid boss!", ephemeral=True)
+                return
 
-        if not raid_type_result:
-            conn_a.close()
-            await btn_interaction.response.send_message("❌ No active raid boss!", ephemeral=True)
-            return
+            easy_max_hp, hard_max_hp, normal_max_hp = raid_type_result
 
-        easy_max_hp, hard_max_hp, normal_max_hp = raid_type_result
+            c_a.execute('SELECT tier FROM raid_damage WHERE guild_id = ? AND user_id = ?',
+                      (btn_interaction.guild_id, btn_interaction.user.id))
+            tier_result = c_a.fetchone()
 
-        c_a.execute('SELECT tier FROM raid_damage WHERE guild_id = ? AND user_id = ?',
-                  (btn_interaction.guild_id, btn_interaction.user.id))
-        tier_result = c_a.fetchone()
-
-        if not tier_result:
-            conn_a.close()
-            await btn_interaction.response.send_message(
-                "❌ You haven't selected a tier yet! Use `/raidstatus` to join a tier.",
-                ephemeral=True
-            )
-            return
-
-        user_tier = tier_result[0]
-
-        c_a.execute('SELECT last_attack_time FROM raid_damage WHERE guild_id = ? AND user_id = ?',
-                  (btn_interaction.guild_id, btn_interaction.user.id))
-        cooldown_result = c_a.fetchone()
-
-        if cooldown_result and cooldown_result[0]:
-            time_since_last = current_time - cooldown_result[0]
-            cooldown_duration = 10 * 60
-
-            if time_since_last < cooldown_duration:
-                time_left = cooldown_duration - time_since_last
-                minutes_left = time_left // 60
-                seconds_left = time_left % 60
-                conn_a.close()
+            if not tier_result:
                 await btn_interaction.response.send_message(
-                    f"⏰ You're still recovering! Attack again in **{minutes_left}m {seconds_left}s**",
+                    "❌ You haven't selected a tier yet! Use `/raidstatus` to join a tier.",
                     ephemeral=True
                 )
                 return
 
-        c_a.execute('SELECT dragon_type, count FROM user_dragons WHERE guild_id = ? AND user_id = ? AND count > 0',
-                  (btn_interaction.guild_id, btn_interaction.user.id))
-        user_dragons = c_a.fetchall()
+            user_tier = tier_result[0]
 
-        if not user_dragons:
-            conn_a.close()
-            await btn_interaction.response.send_message(
-                "❌ You need dragons to attack!",
-                ephemeral=True
-            )
-            return
+            c_a.execute('SELECT last_attack_time FROM raid_damage WHERE guild_id = ? AND user_id = ?',
+                      (btn_interaction.guild_id, btn_interaction.user.id))
+            cooldown_result = c_a.fetchone()
 
-        damage = 0
-        for dragon_type, count in user_dragons:
-            dragon_rarity = 'common'
-            for rarity, dragons in DRAGON_RARITY_TIERS.items():
-                if dragon_type in dragons:
-                    dragon_rarity = rarity
-                    break
+            if cooldown_result and cooldown_result[0]:
+                time_since_last = current_time - cooldown_result[0]
+                cooldown_duration = 10 * 60
 
-            damage_per_dragon = RARITY_DAMAGE[dragon_rarity]
-            damage += count * damage_per_dragon
+                if time_since_last < cooldown_duration:
+                    time_left = cooldown_duration - time_since_last
+                    minutes_left = time_left // 60
+                    seconds_left = time_left % 60
+                    await btn_interaction.response.send_message(
+                        f"⏰ You're still recovering! Attack again in **{minutes_left}m {seconds_left}s**",
+                        ephemeral=True
+                    )
+                    return
 
-        c_a.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
-                  (btn_interaction.guild_id, btn_interaction.user.id, 'precisionstone'))
-        stone_result = c_a.fetchone()
-        precision_stones = stone_result[0] if stone_result else 0
-        precision_bonus = min(precision_stones * 0.05, 0.30)
-        damage = int(damage * (1 + precision_bonus))
+            c_a.execute('SELECT dragon_type, count FROM user_dragons WHERE guild_id = ? AND user_id = ? AND count > 0',
+                      (btn_interaction.guild_id, btn_interaction.user.id))
+            user_dragons = c_a.fetchall()
 
-        if damage <= 0:
-            damage = 1
-
-        c_a.execute(f'UPDATE raid_bosses SET {user_tier}_hp = {user_tier}_hp - ? WHERE guild_id = ?',
-                  (damage, btn_interaction.guild_id))
-
-        # Check if tier is defeated
-        c_a.execute(f'SELECT {user_tier}_hp FROM raid_bosses WHERE guild_id = ?', (btn_interaction.guild_id,))
-        hp_check = c_a.fetchone()
-        tier_defeated = False
-        if hp_check and hp_check[0] <= 0:
-            tier_defeated = True
-            c_a.execute(f'UPDATE raid_bosses SET {user_tier}_hp = 0 WHERE guild_id = ?', (btn_interaction.guild_id,))
-
-        c_a.execute('''INSERT INTO raid_damage (guild_id, user_id, tier, damage_dealt, attacks_made, last_attack_time)
-                       VALUES (?, ?, ?, ?, 1, ?)
-                       ON CONFLICT(guild_id, user_id)
-                       DO UPDATE SET damage_dealt = damage_dealt + ?, attacks_made = attacks_made + 1, last_attack_time = ?''',
-                  (btn_interaction.guild_id, btn_interaction.user.id, user_tier, damage, current_time, damage, current_time))
-
-        c_a.execute('SELECT damage_dealt FROM raid_damage WHERE guild_id = ? AND user_id = ?',
-                  (btn_interaction.guild_id, btn_interaction.user.id))
-        total_damage_result = c_a.fetchone()
-        user_total_damage = total_damage_result[0] if total_damage_result else damage
-
-        conn_a.commit()
-
-        # Get updated boss data for embed update
-        c_a.execute('SELECT easy_hp, easy_max_hp, normal_hp, normal_max_hp, hard_hp, hard_max_hp, boss_name, boss_rarity, reward_dragon, expires_at, message_id FROM raid_bosses WHERE guild_id = ?',
-                  (btn_interaction.guild_id,))
-        boss_data = c_a.fetchone()
-
-        if boss_data:
-            easy_hp, easy_max_hp, normal_hp, normal_max_hp, hard_hp, hard_max_hp, boss_name, boss_rarity, reward_dragon, expires_at, message_id = boss_data
-
-            if message_id:
-                try:
-                    raid_channel = btn_interaction.client.get_channel(btn_interaction.channel_id)
-                    if raid_channel:
-                        raid_msg = await raid_channel.fetch_message(message_id)
-                        if raid_msg:
-                            dragon_data = DRAGON_TYPES[reward_dragon]
-                            tier_emoji = {'easy': '🟢', 'normal': '🟡', 'hard': '🔴'}[user_tier]
-                            tier_color = {'easy': discord.Color.green(), 'normal': discord.Color.blue(), 'hard': discord.Color.red()}[user_tier]
-                            updated_embed = discord.Embed(
-                                title=f"⚔️ {user_tier.upper()} TIER RAID",
-                                description=f"Boss: {boss_name}\nRarity: {boss_rarity.title()}\nYour Tier: {tier_emoji} {user_tier.upper()}",
-                                color=tier_color
-                            )
-
-                            if user_tier == 'easy':
-                                current_hp, max_hp = easy_hp, easy_max_hp
-                            elif user_tier == 'normal':
-                                current_hp, max_hp = normal_hp, normal_max_hp
-                            else:
-                                current_hp, max_hp = hard_hp, hard_max_hp
-
-                            hp_percent = (current_hp / max_hp * 100) if max_hp > 0 else 0
-                            bar_length = 20
-                            filled = int(bar_length * hp_percent / 100)
-                            bar = '█' * filled + '░' * (bar_length - filled)
-
-                            updated_embed.add_field(
-                                name="HP",
-                                value=f"{bar} {hp_percent:.1f}%\n{current_hp:,} / {max_hp:,}",
-                                inline=False
-                            )
-
-                            updated_embed.add_field(
-                                name="🎁 Reward",
-                                value=f"{dragon_data['emoji']} **{dragon_data['name']} Dragon**",
-                                inline=True
-                            )
-
-                            c_a.execute(f'SELECT {user_tier}_participants FROM raid_bosses WHERE guild_id = ?', (btn_interaction.guild_id,))
-                            part_result = c_a.fetchone()
-                            participants = len(eval(part_result[0])) if part_result and part_result[0] else 0
-                            updated_embed.add_field(
-                                name="👥 Participants",
-                                value=f"{participants}",
-                                inline=True
-                            )
-
-                            time_left = expires_at - int(time.time())
-                            hours = time_left // 3600
-                            minutes = (time_left % 3600) // 60
-                            updated_embed.add_field(
-                                name="⏰ Time Left",
-                                value=f"{hours}h {minutes}m",
-                                inline=True
-                            )
-
-                            max_damage_per_attack = {'easy': '10,000', 'normal': '25,000', 'hard': '50,000'}[user_tier]
-                            updated_embed.add_field(
-                                name="Your Stats",
-                                value=f"💥 Damage: {user_total_damage:,}\n⚔️ Max per Attack: {max_damage_per_attack}\n🔄 Attacks: {total_damage_result[0] if total_damage_result else 0}",
-                                inline=False
-                            )
-
-                            c_a.execute(f'SELECT user_id, damage_dealt FROM raid_damage WHERE guild_id = ? AND tier = ? ORDER BY damage_dealt DESC LIMIT 5', (btn_interaction.guild_id, user_tier))
-                            leaderboard = c_a.fetchall()
-                            lb_text = "**Leaderboard (" + user_tier.upper() + " TIER)**\n"
-                            for idx, (uid, dmg) in enumerate(leaderboard, 1):
-                                member = btn_interaction.guild.get_member(uid)
-                                if member:
-                                    medals = ['🥇', '🥈', '🥉']
-                                    medal = medals[idx-1] if idx <= 3 else f"#{idx}"
-                                    lb_text += f"{medal} @{member.name}: {dmg:,} damage\n"
-
-                            updated_embed.add_field(
-                                name="📊 Leaderboard",
-                                value=lb_text,
-                                inline=False
-                            )
-
-                            await raid_msg.edit(embed=updated_embed)
-                except Exception as e:
-                    print(f"Error updating raid embed: {e}")
-
-        tier_names = {'easy': '🟢 EASY', 'normal': '🟡 NORMAL', 'hard': '🔴 HARD'}
-
-        if tier_defeated:
-            await btn_interaction.response.send_message(
-                f"⚔️ {btn_interaction.user.mention} dealt **{damage:,}** damage! ({tier_names[user_tier]})\n"
-                f"💥 Total Damage: **{user_total_damage:,}**\n\n"
-                f"🎉 **{tier_names[user_tier]} TIER DEFEATED!**",
-                ephemeral=False
-            )
-        else:
-            await btn_interaction.response.send_message(
-                f"⚔️ {btn_interaction.user.mention} dealt **{damage:,}** damage! ({tier_names[user_tier]})\n"
-                f"💥 Total Damage: **{user_total_damage:,}**\n"
-                f"⏰ Next attack in: **10 minutes**",
-                ephemeral=False
-            )
-
-        # Ensure user is in the participants list for their tier
-        c_a.execute(f'SELECT {user_tier}_participants FROM raid_bosses WHERE guild_id = ?', (btn_interaction.guild_id,))
-        part_result = c_a.fetchone()
-        if part_result:
-            participants = eval(part_result[0]) if part_result[0] else []
-            if btn_interaction.user.id not in participants:
-                participants.append(btn_interaction.user.id)
-                c_a.execute(f'UPDATE raid_bosses SET {user_tier}_participants = ? WHERE guild_id = ?',
-                           (str(participants), btn_interaction.guild_id))
-                conn_a.commit()
-
-        # Update the ORIGINAL raid spawn embed with updated HP/participants
-        await update_raid_embed(btn_interaction.guild_id, btn_interaction.channel_id, btn_interaction.client, user_tier)
-
-        # Update the /raidstatus message if this is called from there
-        if btn_interaction.message:
-            try:
-                c_a.execute('SELECT tier FROM raid_damage WHERE guild_id = ? AND user_id = ?',
-                          (btn_interaction.guild_id, btn_interaction.user.id))
-                tier_result = c_a.fetchone()
-                if tier_result:
-                    user_tier_check = tier_result[0]
-
-                    c_a.execute('''SELECT easy_hp, easy_max_hp, normal_hp, normal_max_hp, hard_hp, hard_max_hp,
-                                   boss_name, boss_rarity, reward_dragon, expires_at, easy_participants, normal_participants, hard_participants
-                                   FROM raid_bosses WHERE guild_id = ?''', (btn_interaction.guild_id,))
-                    fresh_boss_data = c_a.fetchone()
-
-                    if fresh_boss_data:
-                        easy_hp_f, easy_max_hp_f, normal_hp_f, normal_max_hp_f, hard_hp_f, hard_max_hp_f, boss_name_f, boss_rarity_f, reward_dragon_f, expires_at_f, easy_part_f, normal_part_f, hard_part_f = fresh_boss_data
-
-                        c_a.execute('SELECT damage_dealt, attacks_made FROM raid_damage WHERE guild_id = ? AND user_id = ?',
-                                  (btn_interaction.guild_id, btn_interaction.user.id))
-                        user_stats = c_a.fetchone()
-                        user_damage_f, user_attacks_f = user_stats if user_stats else (0, 0)
-
-                        tier_hp_map = {
-                            'easy': (easy_hp_f, easy_max_hp_f, easy_part_f),
-                            'normal': (normal_hp_f, normal_max_hp_f, normal_part_f),
-                            'hard': (hard_hp_f, hard_max_hp_f, hard_part_f)
-                        }
-                        tier_hp_f, tier_max_hp_f, tier_part_f = tier_hp_map[user_tier_check]
-                        tier_part = eval(tier_part_f) if tier_part_f else []
-
-                        hp_percentage = (tier_hp_f / tier_max_hp_f * 100) if tier_max_hp_f > 0 else 0
-                        hp_bar_length = 20
-                        filled = int((hp_percentage / 100) * hp_bar_length)
-                        hp_bar = "█" * filled + "░" * (hp_bar_length - filled)
-
-                        time_left = expires_at_f - int(time.time())
-                        reward_data = DRAGON_TYPES[reward_dragon_f]
-                        tier_names_display = {'easy': '🟢 EASY', 'normal': '🟡 NORMAL', 'hard': '🔴 HARD'}
-                        tier_damage_caps = {'easy': 25000, 'normal': 60000, 'hard': 100000}
-
-                        updated_raidstatus_embed = discord.Embed(
-                            title=f"⚔️ {tier_names_display[user_tier_check]} TIER RAID",
-                            description=f"**Boss:** {boss_name_f}\n"
-                                       f"**Rarity:** {boss_rarity_f.title()}\n"
-                                       f"**Your Tier:** {tier_names_display[user_tier_check]}\n\n"
-                                       f"**HP:** {tier_hp_f:,} / {tier_max_hp_f:,}\n"
-                                       f"{hp_bar} {hp_percentage:.1f}%\n\n"
-                                       f"🎁 **Reward:** {reward_data['emoji']} {reward_data['name']} Dragon\n"
-                                       f"👥 **Participants in your tier:** {len(tier_part)}\n"
-                                       f"⏰ **Time Left:** {format_time_remaining(time_left)}\n\n"
-                                       f"**Your Stats:**\n"
-                                       f"💥 Damage: {user_damage_f:,}\n"
-                                       f"⚔️ Max per Attack: {tier_damage_caps[user_tier_check]:,}\n"
-                                       f"🔄 Attacks: {user_attacks_f}",
-                            color=discord.Color.red()
-                        )
-
-                        c_a.execute('''SELECT user_id, damage_dealt FROM raid_damage
-                                     WHERE guild_id = ? AND tier = ?
-                                     ORDER BY damage_dealt DESC LIMIT 5''',
-                                   (btn_interaction.guild_id, user_tier_check))
-                        tier_leaderboard = c_a.fetchall()
-
-                        if tier_leaderboard:
-                            lb_text = ""
-                            for idx, (uid, dmg) in enumerate(tier_leaderboard, 1):
-                                member = btn_interaction.guild.get_member(uid)
-                                if member:
-                                    medals = ['🥇', '🥈', '🥉']
-                                    medal = medals[idx-1] if idx <= 3 else f"#{idx}"
-                                    lb_text += f"{medal} {member.mention}: {dmg:,} damage\n"
-
-                            updated_raidstatus_embed.add_field(
-                                name=f"📊 Leaderboard ({user_tier_check.upper()} TIER)",
-                                value=lb_text,
-                                inline=False
-                            )
-
-                        await btn_interaction.message.edit(embed=updated_raidstatus_embed)
-            except Exception as e:
-                print(f"Error updating raidstatus message: {e}")
-
-        c_a.execute('SELECT easy_hp, normal_hp, hard_hp, expires_at, reward_dragon, boss_rarity, boss_name FROM raid_bosses WHERE guild_id = ?',
-                  (btn_interaction.guild_id,))
-        boss_update = c_a.fetchone()
-
-        if boss_update:
-            easy_hp, normal_hp, hard_hp, expires_at, reward_dragon, boss_rarity, boss_name = boss_update
-
-            defeated_tiers = []
-            if easy_hp <= 0:
-                defeated_tiers.append('easy')
-            if normal_hp <= 0:
-                defeated_tiers.append('normal')
-            if hard_hp <= 0:
-                defeated_tiers.append('hard')
-
-            if defeated_tiers:
-                reward_data = DRAGON_TYPES[reward_dragon]
-
-                defeated_embed = discord.Embed(
-                    title=f"💀 RAID TIER(S) DEFEATED!",
-                    description=f"**{boss_name}** has been slain!\n\n🎁 **Rewards distributed per tier:**",
-                    color=discord.Color.gold()
+            if not user_dragons:
+                await btn_interaction.response.send_message(
+                    "❌ You need dragons to attack!",
+                    ephemeral=True
                 )
+                return
 
-                tier_rewards = {'easy': 1, 'normal': 2, 'hard': 3}
-
-                for tier in defeated_tiers:
-                    tier_names_display = {'easy': '🟢 EASY', 'normal': '🟡 NORMAL', 'hard': '🔴 HARD'}
-
-                    c_a.execute('''SELECT user_id, damage_dealt FROM raid_damage
-                                  WHERE guild_id = ? AND tier = ?
-                                  ORDER BY damage_dealt DESC LIMIT 10''',
-                               (btn_interaction.guild_id, tier))
-                    tier_damagers = c_a.fetchall()
-
-                    coin_multipliers = {'epic': 1.0, 'legendary': 1.5, 'mythic': 2.5, 'ultra': 5.0}
-                    base_coin_rewards = [1000, 750, 500, 400, 300, 250, 200, 150, 100, 50]
-                    multiplier = coin_multipliers.get(boss_rarity, 1.0)
-                    adjusted_rewards = [int(coins * multiplier) for coins in base_coin_rewards]
-
-                    dragon_reward_count = tier_rewards[tier]
-
-                    tier_field = f"**Leaderboard:**\n"
-                    for idx, (uid, dmg) in enumerate(tier_damagers, 1):
-                        member = btn_interaction.guild.get_member(uid)
-                        if member:
-                            await add_dragons(btn_interaction.guild_id, uid, reward_dragon, dragon_reward_count)
-                            bonus_coins = adjusted_rewards[idx-1]
-                            await asyncio.to_thread(update_balance, btn_interaction.guild_id, uid, bonus_coins)
-
-                            lucky_charm_chance = random.randint(1, 100)
-                            if lucky_charm_chance <= 5:
-                                c_a.execute('''INSERT INTO user_items (guild_id, user_id, item_type, count)
-                                               VALUES (?, ?, ?, 1)
-                                               ON CONFLICT(guild_id, user_id, item_type)
-                                               DO UPDATE SET count = count + 1''',
-                                            (btn_interaction.guild_id, uid, 'luckycharm'))
-
-                            dragonscale_chance = random.randint(1, 100)
-                            if dragonscale_chance <= 2:
-                                c_a.execute('''INSERT INTO user_items (guild_id, user_id, item_type, count)
-                                               VALUES (?, ?, ?, 1)
-                                               ON CONFLICT(guild_id, user_id, item_type)
-                                               DO UPDATE SET count = count + 1''',
-                                            (btn_interaction.guild_id, uid, 'dragonscale'))
-
-                            medals = ['🥇', '🥈', '🥉']
-                            medal = medals[idx-1] if idx <= 3 else f"#{idx}"
-
-                            reward_text = f"💥 {dmg:,} dmg | {reward_data['emoji']} +{dragon_reward_count} | 💰 +{bonus_coins}"
-                            if lucky_charm_chance <= 5:
-                                reward_text += " | 🍀+1"
-                            if dragonscale_chance <= 2:
-                                reward_text += " | ✨+1"
-
-                            tier_field += f"{medal} {member.display_name}: {reward_text}\n"
-
-                    defeated_embed.add_field(
-                        name=tier_names_display[tier],
-                        value=tier_field,
-                        inline=False
+            damage = 0
+            for dragon_type, count in user_dragons:
+                dragon_rarity = 'common'
+                for rarity, dragons in DRAGON_RARITY_TIERS.items():
+                    if dragon_type in dragons:
+                        dragon_rarity = rarity
+                        break
+    
+                damage_per_dragon = RARITY_DAMAGE[dragon_rarity]
+                damage += count * damage_per_dragon
+    
+            c_a.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
+                      (btn_interaction.guild_id, btn_interaction.user.id, 'precisionstone'))
+            stone_result = c_a.fetchone()
+            precision_stones = stone_result[0] if stone_result else 0
+            precision_bonus = min(precision_stones * 0.05, 0.30)
+            damage = int(damage * (1 + precision_bonus))
+    
+            if damage <= 0:
+                damage = 1
+    
+            c_a.execute(f'UPDATE raid_bosses SET {user_tier}_hp = {user_tier}_hp - ? WHERE guild_id = ? AND {user_tier}_hp > 0',
+                      (damage, btn_interaction.guild_id))
+            was_killing_blow = c_a.rowcount > 0
+    
+            # Check if tier is defeated
+            c_a.execute(f'SELECT {user_tier}_hp FROM raid_bosses WHERE guild_id = ?', (btn_interaction.guild_id,))
+            hp_row = c_a.fetchone()
+            new_hp = hp_row[0] if hp_row else 0
+            tier_defeated = was_killing_blow and new_hp <= 0
+            if tier_defeated:
+                c_a.execute(f'UPDATE raid_bosses SET {user_tier}_hp = 0 WHERE guild_id = ?', (btn_interaction.guild_id,))
+    
+            c_a.execute('''INSERT INTO raid_damage (guild_id, user_id, tier, damage_dealt, attacks_made, last_attack_time)
+                           VALUES (?, ?, ?, ?, 1, ?)
+                           ON CONFLICT(guild_id, user_id)
+                           DO UPDATE SET damage_dealt = damage_dealt + ?, attacks_made = attacks_made + 1, last_attack_time = ?''',
+                      (btn_interaction.guild_id, btn_interaction.user.id, user_tier, damage, current_time, damage, current_time))
+    
+            c_a.execute('SELECT damage_dealt FROM raid_damage WHERE guild_id = ? AND user_id = ?',
+                      (btn_interaction.guild_id, btn_interaction.user.id))
+            total_damage_result = c_a.fetchone()
+            user_total_damage = total_damage_result[0] if total_damage_result else damage
+    
+            conn_a.commit()
+    
+            # Get updated boss data for embed update
+            c_a.execute('SELECT easy_hp, easy_max_hp, normal_hp, normal_max_hp, hard_hp, hard_max_hp, boss_name, boss_rarity, reward_dragon, expires_at, message_id FROM raid_bosses WHERE guild_id = ?',
+                      (btn_interaction.guild_id,))
+            boss_data = c_a.fetchone()
+    
+            if boss_data:
+                easy_hp, easy_max_hp, normal_hp, normal_max_hp, hard_hp, hard_max_hp, boss_name, boss_rarity, reward_dragon, expires_at, message_id = boss_data
+    
+                if message_id:
+                    try:
+                        raid_channel = btn_interaction.client.get_channel(btn_interaction.channel_id)
+                        if raid_channel:
+                            raid_msg = await raid_channel.fetch_message(message_id)
+                            if raid_msg:
+                                dragon_data = DRAGON_TYPES[reward_dragon]
+                                tier_emoji = {'easy': '🟢', 'normal': '🟡', 'hard': '🔴'}[user_tier]
+                                tier_color = {'easy': discord.Color.green(), 'normal': discord.Color.blue(), 'hard': discord.Color.red()}[user_tier]
+                                updated_embed = discord.Embed(
+                                    title=f"⚔️ {user_tier.upper()} TIER RAID",
+                                    description=f"Boss: {boss_name}\nRarity: {boss_rarity.title()}\nYour Tier: {tier_emoji} {user_tier.upper()}",
+                                    color=tier_color
+                                )
+    
+                                if user_tier == 'easy':
+                                    current_hp, max_hp = easy_hp, easy_max_hp
+                                elif user_tier == 'normal':
+                                    current_hp, max_hp = normal_hp, normal_max_hp
+                                else:
+                                    current_hp, max_hp = hard_hp, hard_max_hp
+    
+                                hp_percent = (current_hp / max_hp * 100) if max_hp > 0 else 0
+                                bar_length = 20
+                                filled = int(bar_length * hp_percent / 100)
+                                bar = '█' * filled + '░' * (bar_length - filled)
+    
+                                updated_embed.add_field(
+                                    name="HP",
+                                    value=f"{bar} {hp_percent:.1f}%\n{current_hp:,} / {max_hp:,}",
+                                    inline=False
+                                )
+    
+                                updated_embed.add_field(
+                                    name="🎁 Reward",
+                                    value=f"{dragon_data['emoji']} **{dragon_data['name']} Dragon**",
+                                    inline=True
+                                )
+    
+                                c_a.execute(f'SELECT {user_tier}_participants FROM raid_bosses WHERE guild_id = ?', (btn_interaction.guild_id,))
+                                part_result = c_a.fetchone()
+                                participants = len(ast.literal_eval(part_result[0])) if part_result and part_result[0] else 0
+                                updated_embed.add_field(
+                                    name="👥 Participants",
+                                    value=f"{participants}",
+                                    inline=True
+                                )
+    
+                                time_left = expires_at - int(time.time())
+                                hours = time_left // 3600
+                                minutes = (time_left % 3600) // 60
+                                updated_embed.add_field(
+                                    name="⏰ Time Left",
+                                    value=f"{hours}h {minutes}m",
+                                    inline=True
+                                )
+    
+                                max_damage_per_attack = {'easy': '10,000', 'normal': '25,000', 'hard': '50,000'}[user_tier]
+                                updated_embed.add_field(
+                                    name="Your Stats",
+                                    value=f"💥 Damage: {user_total_damage:,}\n⚔️ Max per Attack: {max_damage_per_attack}\n🔄 Attacks: {total_damage_result[0] if total_damage_result else 0}",
+                                    inline=False
+                                )
+    
+                                c_a.execute(f'SELECT user_id, damage_dealt FROM raid_damage WHERE guild_id = ? AND tier = ? ORDER BY damage_dealt DESC LIMIT 5', (btn_interaction.guild_id, user_tier))
+                                leaderboard = c_a.fetchall()
+                                lb_text = "**Leaderboard (" + user_tier.upper() + " TIER)**\n"
+                                for idx, (uid, dmg) in enumerate(leaderboard, 1):
+                                    member = btn_interaction.guild.get_member(uid)
+                                    if member:
+                                        medals = ['🥇', '🥈', '🥉']
+                                        medal = medals[idx-1] if idx <= 3 else f"#{idx}"
+                                        lb_text += f"{medal} @{member.name}: {dmg:,} damage\n"
+    
+                                updated_embed.add_field(
+                                    name="📊 Leaderboard",
+                                    value=lb_text,
+                                    inline=False
+                                )
+    
+                                await raid_msg.edit(embed=updated_embed)
+                    except Exception as e:
+                        logger.error(f"Error updating raid embed: {e}")
+    
+            tier_names = {'easy': '🟢 EASY', 'normal': '🟡 NORMAL', 'hard': '🔴 HARD'}
+    
+            if tier_defeated:
+                await btn_interaction.response.send_message(
+                    f"⚔️ {btn_interaction.user.mention} dealt **{damage:,}** damage! ({tier_names[user_tier]})\n"
+                    f"💥 Total Damage: **{user_total_damage:,}**\n\n"
+                    f"🎉 **{tier_names[user_tier]} TIER DEFEATED!**",
+                    ephemeral=False
+                )
+            else:
+                await btn_interaction.response.send_message(
+                    f"⚔️ {btn_interaction.user.mention} dealt **{damage:,}** damage! ({tier_names[user_tier]})\n"
+                    f"💥 Total Damage: **{user_total_damage:,}**\n"
+                    f"⏰ Next attack in: **10 minutes**",
+                    ephemeral=False
+                )
+    
+            # Ensure user is in the participants list for their tier
+            c_a.execute(f'SELECT {user_tier}_participants FROM raid_bosses WHERE guild_id = ?', (btn_interaction.guild_id,))
+            part_result = c_a.fetchone()
+            if part_result:
+                participants = ast.literal_eval(part_result[0]) if part_result[0] else []
+                if btn_interaction.user.id not in participants:
+                    participants.append(btn_interaction.user.id)
+                    c_a.execute(f'UPDATE raid_bosses SET {user_tier}_participants = ? WHERE guild_id = ?',
+                               (str(participants), btn_interaction.guild_id))
+                    conn_a.commit()
+    
+            # Update the ORIGINAL raid spawn embed with updated HP/participants
+            await update_raid_embed(btn_interaction.guild_id, btn_interaction.channel_id, btn_interaction.client, user_tier)
+    
+            # Update the /raidstatus message if this is called from there
+            if btn_interaction.message:
+                try:
+                    c_a.execute('SELECT tier FROM raid_damage WHERE guild_id = ? AND user_id = ?',
+                              (btn_interaction.guild_id, btn_interaction.user.id))
+                    tier_result = c_a.fetchone()
+                    if tier_result:
+                        user_tier_check = tier_result[0]
+    
+                        c_a.execute('''SELECT easy_hp, easy_max_hp, normal_hp, normal_max_hp, hard_hp, hard_max_hp,
+                                       boss_name, boss_rarity, reward_dragon, expires_at, easy_participants, normal_participants, hard_participants
+                                       FROM raid_bosses WHERE guild_id = ?''', (btn_interaction.guild_id,))
+                        fresh_boss_data = c_a.fetchone()
+    
+                        if fresh_boss_data:
+                            easy_hp_f, easy_max_hp_f, normal_hp_f, normal_max_hp_f, hard_hp_f, hard_max_hp_f, boss_name_f, boss_rarity_f, reward_dragon_f, expires_at_f, easy_part_f, normal_part_f, hard_part_f = fresh_boss_data
+    
+                            c_a.execute('SELECT damage_dealt, attacks_made FROM raid_damage WHERE guild_id = ? AND user_id = ?',
+                                      (btn_interaction.guild_id, btn_interaction.user.id))
+                            user_stats = c_a.fetchone()
+                            user_damage_f, user_attacks_f = user_stats if user_stats else (0, 0)
+    
+                            tier_hp_map = {
+                                'easy': (easy_hp_f, easy_max_hp_f, easy_part_f),
+                                'normal': (normal_hp_f, normal_max_hp_f, normal_part_f),
+                                'hard': (hard_hp_f, hard_max_hp_f, hard_part_f)
+                            }
+                            tier_hp_f, tier_max_hp_f, tier_part_f = tier_hp_map[user_tier_check]
+                            tier_part = ast.literal_eval(tier_part_f) if tier_part_f else []
+    
+                            hp_percentage = (tier_hp_f / tier_max_hp_f * 100) if tier_max_hp_f > 0 else 0
+                            hp_bar_length = 20
+                            filled = int((hp_percentage / 100) * hp_bar_length)
+                            hp_bar = "█" * filled + "░" * (hp_bar_length - filled)
+    
+                            time_left = expires_at_f - int(time.time())
+                            reward_data = DRAGON_TYPES[reward_dragon_f]
+                            tier_names_display = {'easy': '🟢 EASY', 'normal': '🟡 NORMAL', 'hard': '🔴 HARD'}
+                            tier_damage_caps = {'easy': 25000, 'normal': 60000, 'hard': 100000}
+    
+                            updated_raidstatus_embed = discord.Embed(
+                                title=f"⚔️ {tier_names_display[user_tier_check]} TIER RAID",
+                                description=f"**Boss:** {boss_name_f}\n"
+                                           f"**Rarity:** {boss_rarity_f.title()}\n"
+                                           f"**Your Tier:** {tier_names_display[user_tier_check]}\n\n"
+                                           f"**HP:** {tier_hp_f:,} / {tier_max_hp_f:,}\n"
+                                           f"{hp_bar} {hp_percentage:.1f}%\n\n"
+                                           f"🎁 **Reward:** {reward_data['emoji']} {reward_data['name']} Dragon\n"
+                                           f"👥 **Participants in your tier:** {len(tier_part)}\n"
+                                           f"⏰ **Time Left:** {format_time_remaining(time_left)}\n\n"
+                                           f"**Your Stats:**\n"
+                                           f"💥 Damage: {user_damage_f:,}\n"
+                                           f"⚔️ Max per Attack: {tier_damage_caps[user_tier_check]:,}\n"
+                                           f"🔄 Attacks: {user_attacks_f}",
+                                color=discord.Color.red()
+                            )
+    
+                            c_a.execute('''SELECT user_id, damage_dealt FROM raid_damage
+                                         WHERE guild_id = ? AND tier = ?
+                                         ORDER BY damage_dealt DESC LIMIT 5''',
+                                       (btn_interaction.guild_id, user_tier_check))
+                            tier_leaderboard = c_a.fetchall()
+    
+                            if tier_leaderboard:
+                                lb_text = ""
+                                for idx, (uid, dmg) in enumerate(tier_leaderboard, 1):
+                                    member = btn_interaction.guild.get_member(uid)
+                                    if member:
+                                        medals = ['🥇', '🥈', '🥉']
+                                        medal = medals[idx-1] if idx <= 3 else f"#{idx}"
+                                        lb_text += f"{medal} {member.mention}: {dmg:,} damage\n"
+    
+                                updated_raidstatus_embed.add_field(
+                                    name=f"📊 Leaderboard ({user_tier_check.upper()} TIER)",
+                                    value=lb_text,
+                                    inline=False
+                                )
+    
+                            await btn_interaction.message.edit(embed=updated_raidstatus_embed)
+                except Exception as e:
+                    logger.error(f"Error updating raidstatus message: {e}")
+    
+            c_a.execute('SELECT easy_hp, normal_hp, hard_hp, expires_at, reward_dragon, boss_rarity, boss_name FROM raid_bosses WHERE guild_id = ?',
+                      (btn_interaction.guild_id,))
+            boss_update = c_a.fetchone()
+    
+            if boss_update:
+                easy_hp, normal_hp, hard_hp, expires_at, reward_dragon, boss_rarity, boss_name = boss_update
+    
+                defeated_tiers = []
+                if easy_hp <= 0:
+                    defeated_tiers.append('easy')
+                if normal_hp <= 0:
+                    defeated_tiers.append('normal')
+                if hard_hp <= 0:
+                    defeated_tiers.append('hard')
+    
+                if defeated_tiers:
+                    reward_data = DRAGON_TYPES[reward_dragon]
+    
+                    defeated_embed = discord.Embed(
+                        title=f"💀 RAID TIER(S) DEFEATED!",
+                        description=f"**{boss_name}** has been slain!\n\n🎁 **Rewards distributed per tier:**",
+                        color=discord.Color.gold()
                     )
-
-                # Delete only this defeated tier's damage records
-                tier_name = list(defeated_tiers)[0]
-                c_a.execute('DELETE FROM raid_damage WHERE guild_id = ? AND tier = ?',
-                           (btn_interaction.guild_id, tier_name))
-
-                # Check if ANY raid tiers are still active
-                remaining_tiers = c_a.execute('SELECT DISTINCT tier FROM raid_damage WHERE guild_id = ?',
-                                             (btn_interaction.guild_id,)).fetchall()
-
-                # Check if ALL tiers are now defeated
-                all_tiers_hp = c_a.execute('SELECT easy_hp, normal_hp, hard_hp FROM raid_bosses WHERE guild_id = ? ORDER BY expires_at DESC LIMIT 1',
-                                          (btn_interaction.guild_id,)).fetchone()
-
-                if all_tiers_hp and all(hp <= 0 for hp in all_tiers_hp):
-                    defeated_embed.add_field(
-                        name="🐉 Dragons Are Spawning Again!",
-                        value="All raid tiers have been defeated! Wild dragons will now spawn normally.",
-                        inline=False
-                    )
-                    c_a.execute('DELETE FROM raid_bosses WHERE guild_id = ? ORDER BY expires_at DESC LIMIT 1', (btn_interaction.guild_id,))
-                    c_a.execute('DELETE FROM raid_damage WHERE guild_id = ?', (btn_interaction.guild_id,))
-                    if btn_interaction.guild_id in raid_boss_active:
-                        del raid_boss_active[btn_interaction.guild_id]
-                else:
+    
+                    tier_rewards = {'easy': 1, 'normal': 2, 'hard': 3}
+    
+                    for tier in defeated_tiers:
+                        tier_names_display = {'easy': '🟢 EASY', 'normal': '🟡 NORMAL', 'hard': '🔴 HARD'}
+    
+                        c_a.execute('''SELECT user_id, damage_dealt FROM raid_damage
+                                      WHERE guild_id = ? AND tier = ?
+                                      ORDER BY damage_dealt DESC LIMIT 10''',
+                                   (btn_interaction.guild_id, tier))
+                        tier_damagers = c_a.fetchall()
+    
+                        coin_multipliers = {'epic': 1.0, 'legendary': 1.5, 'mythic': 2.5, 'ultra': 5.0}
+                        base_coin_rewards = [1000, 750, 500, 400, 300, 250, 200, 150, 100, 50]
+                        multiplier = coin_multipliers.get(boss_rarity, 1.0)
+                        adjusted_rewards = [int(coins * multiplier) for coins in base_coin_rewards]
+    
+                        dragon_reward_count = tier_rewards[tier]
+    
+                        tier_field = f"**Leaderboard:**\n"
+                        for idx, (uid, dmg) in enumerate(tier_damagers, 1):
+                            member = btn_interaction.guild.get_member(uid)
+                            if member:
+                                await add_dragons(btn_interaction.guild_id, uid, reward_dragon, dragon_reward_count)
+                                bonus_coins = adjusted_rewards[idx-1]
+                                await asyncio.to_thread(update_balance, btn_interaction.guild_id, uid, bonus_coins)
+    
+                                lucky_charm_chance = random.randint(1, 100)
+                                if lucky_charm_chance <= 5:
+                                    c_a.execute('''INSERT INTO user_items (guild_id, user_id, item_type, count)
+                                                   VALUES (?, ?, ?, 1)
+                                                   ON CONFLICT(guild_id, user_id, item_type)
+                                                   DO UPDATE SET count = count + 1''',
+                                                (btn_interaction.guild_id, uid, 'luckycharm'))
+    
+                                dragonscale_chance = random.randint(1, 100)
+                                if dragonscale_chance <= 2:
+                                    c_a.execute('''INSERT INTO user_items (guild_id, user_id, item_type, count)
+                                                   VALUES (?, ?, ?, 1)
+                                                   ON CONFLICT(guild_id, user_id, item_type)
+                                                   DO UPDATE SET count = count + 1''',
+                                                (btn_interaction.guild_id, uid, 'dragonscale'))
+    
+                                medals = ['🥇', '🥈', '🥉']
+                                medal = medals[idx-1] if idx <= 3 else f"#{idx}"
+    
+                                reward_text = f"💥 {dmg:,} dmg | {reward_data['emoji']} +{dragon_reward_count} | 💰 +{bonus_coins}"
+                                if lucky_charm_chance <= 5:
+                                    reward_text += " | 🍀+1"
+                                if dragonscale_chance <= 2:
+                                    reward_text += " | ✨+1"
+    
+                                tier_field += f"{medal} {member.display_name}: {reward_text}\n"
+    
+                        defeated_embed.add_field(
+                            name=tier_names_display[tier],
+                            value=tier_field,
+                            inline=False
+                        )
+    
+                    # Delete only this defeated tier's damage records
+                    tier_name = list(defeated_tiers)[0]
+                    c_a.execute('DELETE FROM raid_damage WHERE guild_id = ? AND tier = ?',
+                               (btn_interaction.guild_id, tier_name))
+    
+                    # Check if ANY raid tiers are still active
                     remaining_tiers = c_a.execute('SELECT DISTINCT tier FROM raid_damage WHERE guild_id = ?',
                                                  (btn_interaction.guild_id,)).fetchall()
-
-                    if not remaining_tiers:
-                        raid_info = c_a.execute('SELECT easy_participants, normal_participants, hard_participants FROM raid_bosses WHERE guild_id = ? ORDER BY expires_at DESC LIMIT 1',
-                                               (btn_interaction.guild_id,)).fetchone()
-
-                        if raid_info:
-                            easy_part_str, normal_part_str, hard_part_str = raid_info
-                            easy_had_players = bool(eval(easy_part_str)) if easy_part_str else False
-                            normal_had_players = bool(eval(normal_part_str)) if normal_part_str else False
-                            hard_had_players = bool(eval(hard_part_str)) if hard_part_str else False
-
-                            boss_hp = c_a.execute('SELECT easy_hp, normal_hp, hard_hp FROM raid_bosses WHERE guild_id = ? ORDER BY expires_at DESC LIMIT 1',
-                                                 (btn_interaction.guild_id,)).fetchone()
-
-                            if boss_hp:
-                                easy_defeated = boss_hp[0] <= 0 if easy_had_players else True
-                                normal_defeated = boss_hp[1] <= 0 if normal_had_players else True
-                                hard_defeated = boss_hp[2] <= 0 if hard_had_players else True
-
-                                all_played_defeated = easy_defeated and normal_defeated and hard_defeated
-
-                                if all_played_defeated:
-                                    defeated_embed.add_field(
-                                        name="🐉 Dragons Are Spawning Again!",
-                                        value="All raid tiers have been defeated! Wild dragons will now spawn normally.",
-                                        inline=False
-                                    )
-                                    c_a.execute('DELETE FROM raid_bosses WHERE guild_id = ? ORDER BY expires_at DESC LIMIT 1', (btn_interaction.guild_id,))
-                                    if btn_interaction.guild_id in raid_boss_active:
-                                        del raid_boss_active[btn_interaction.guild_id]
-                                else:
-                                    defeated_embed.add_field(
-                                        name="✅ Tier Defeated!",
-                                        value="This raid tier has been defeated, but other tiers are still being played!",
-                                        inline=False
-                                    )
+    
+                    # Check if ALL tiers are now defeated
+                    all_tiers_hp = c_a.execute('SELECT easy_hp, normal_hp, hard_hp FROM raid_bosses WHERE guild_id = ? ORDER BY expires_at DESC LIMIT 1',
+                                              (btn_interaction.guild_id,)).fetchone()
+    
+                    if all_tiers_hp and all(hp <= 0 for hp in all_tiers_hp):
+                        defeated_embed.add_field(
+                            name="🐉 Dragons Are Spawning Again!",
+                            value="All raid tiers have been defeated! Wild dragons will now spawn normally.",
+                            inline=False
+                        )
+                        c_a.execute('DELETE FROM raid_bosses WHERE guild_id = ? ORDER BY expires_at DESC LIMIT 1', (btn_interaction.guild_id,))
+                        c_a.execute('DELETE FROM raid_damage WHERE guild_id = ?', (btn_interaction.guild_id,))
+                        if btn_interaction.guild_id in raid_boss_active:
+                            del raid_boss_active[btn_interaction.guild_id]
+                    else:
+                        remaining_tiers = c_a.execute('SELECT DISTINCT tier FROM raid_damage WHERE guild_id = ?',
+                                                     (btn_interaction.guild_id,)).fetchall()
+    
+                        if not remaining_tiers:
+                            raid_info = c_a.execute('SELECT easy_participants, normal_participants, hard_participants FROM raid_bosses WHERE guild_id = ? ORDER BY expires_at DESC LIMIT 1',
+                                                   (btn_interaction.guild_id,)).fetchone()
+    
+                            if raid_info:
+                                easy_part_str, normal_part_str, hard_part_str = raid_info
+                                easy_had_players = bool(ast.literal_eval(easy_part_str)) if easy_part_str else False
+                                normal_had_players = bool(ast.literal_eval(normal_part_str)) if normal_part_str else False
+                                hard_had_players = bool(ast.literal_eval(hard_part_str)) if hard_part_str else False
+    
+                                boss_hp = c_a.execute('SELECT easy_hp, normal_hp, hard_hp FROM raid_bosses WHERE guild_id = ? ORDER BY expires_at DESC LIMIT 1',
+                                                     (btn_interaction.guild_id,)).fetchone()
+    
+                                if boss_hp:
+                                    easy_defeated = boss_hp[0] <= 0 if easy_had_players else True
+                                    normal_defeated = boss_hp[1] <= 0 if normal_had_players else True
+                                    hard_defeated = boss_hp[2] <= 0 if hard_had_players else True
+    
+                                    all_played_defeated = easy_defeated and normal_defeated and hard_defeated
+    
+                                    if all_played_defeated:
+                                        defeated_embed.add_field(
+                                            name="🐉 Dragons Are Spawning Again!",
+                                            value="All raid tiers have been defeated! Wild dragons will now spawn normally.",
+                                            inline=False
+                                        )
+                                        c_a.execute('DELETE FROM raid_bosses WHERE guild_id = ? ORDER BY expires_at DESC LIMIT 1', (btn_interaction.guild_id,))
+                                        if btn_interaction.guild_id in raid_boss_active:
+                                            del raid_boss_active[btn_interaction.guild_id]
+                                    else:
+                                        defeated_embed.add_field(
+                                            name="✅ Tier Defeated!",
+                                            value="This raid tier has been defeated, but other tiers are still being played!",
+                                            inline=False
+                                        )
+                            else:
+                                defeated_embed.add_field(
+                                    name="✅ Tier Defeated!",
+                                    value="This raid tier has been defeated!",
+                                    inline=False
+                                )
                         else:
                             defeated_embed.add_field(
                                 name="✅ Tier Defeated!",
-                                value="This raid tier has been defeated!",
+                                value="This raid tier has been defeated, but other tiers are still active!",
                                 inline=False
                             )
-                    else:
-                        defeated_embed.add_field(
-                            name="✅ Tier Defeated!",
-                            value="This raid tier has been defeated, but other tiers are still active!",
-                            inline=False
-                        )
-
-                conn_a.commit()
-
-                try:
-                    defeated_message = await btn_interaction.channel.send(embed=defeated_embed)
-                except:
-                    pass
-
-        conn_a.close()
+    
+                    conn_a.commit()
+    
+                    try:
+                        defeated_message = await btn_interaction.channel.send(embed=defeated_embed)
+                    except:
+                        pass
+    
+        finally:
+            conn_a.close()
 
 
 class EventsCog(commands.Cog):
@@ -832,15 +827,15 @@ class EventsCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        print(f'{self.bot.user} is online!')
+        logger.info(f'{self.bot.user} is online!')
         init_db()
 
         # Sync slash commands with Discord
         try:
             synced = await self.bot.tree.sync()
-            print(f'✅ Synced {len(synced)} slash commands')
+            logger.info(f'Synced {len(synced)} slash commands')
         except Exception as e:
-            print(f'❌ Failed to sync commands: {e}')
+            logger.error(f'Failed to sync commands: {e}')
 
         # Clean up old bot messages from previous sessions
         async def cleanup_old_messages():
@@ -885,7 +880,7 @@ class EventsCog(commands.Cog):
                         logger.error(f'Error cleaning up channel {channel_id}: {e}')
 
                 if deleted_count > 0:
-                    print(f'🧹 Cleaned up {deleted_count} old bot messages from previous sessions')
+                    logger.info(f'Cleaned up {deleted_count} old bot messages from previous sessions')
             except Exception as e:
                 logger.error(f'Error in cleanup_old_messages: {e}')
 
@@ -916,7 +911,7 @@ class EventsCog(commands.Cog):
                     estimated_end = event_start + 7200
                     if estimated_end > current_time:
                         active_dragonfest[guild_id] = {'start': event_start, 'end': estimated_end}
-                        print(f"🎉 Recovered Dragonfest for guild {guild_id}, active for ~{(estimated_end - current_time) // 60} more minutes")
+                        logger.info(f"Recovered Dragonfest for guild {guild_id}, active for ~{(estimated_end - current_time) // 60} more minutes")
 
             # NOTE: We do NOT auto-recover dragonscale events because we don't store actual duration
             c.execute('DELETE FROM dragonscale_stats')
@@ -930,7 +925,7 @@ class EventsCog(commands.Cog):
                     'despawn_time': expires_at,
                     'manual_spawn': False
                 }
-                print(f"⚔️ Recovered Raid Boss for guild {guild_id}, despawning in ~{(expires_at - current_time) // 60} minutes")
+                logger.info(f"Recovered Raid Boss for guild {guild_id}, despawning in ~{(expires_at - current_time) // 60} minutes")
 
             conn.commit()
             conn.close()
@@ -939,7 +934,7 @@ class EventsCog(commands.Cog):
 
         await cleanup_old_messages()
 
-        print(f'🐉 Dragon Bot ready! Serving {len(self.bot.guilds)} servers')
+        logger.info(f'Dragon Bot ready! Serving {len(self.bot.guilds)} servers')
 
     @commands.Cog.listener()
     async def on_app_command_error(self, interaction: discord.Interaction, error: Exception):
@@ -1425,9 +1420,9 @@ class EventsCog(commands.Cog):
                                 c_df.close()
                                 conn_df.close()
 
-                                print(f"[DRAGONFEST] Logged {dragon_key}x{final_amount}")
+                                logger.info(f"[DRAGONFEST] Logged {dragon_key}x{final_amount}")
                             except Exception as e:
-                                print(f"[DRAGONFEST] LOG ERROR: {e}")
+                                logger.error(f"[DRAGONFEST] LOG ERROR: {e}")
 
                         # Track dragonscale catches if active
                         if guild_id in active_dragonscales and active_dragonscales[guild_id] > current_time:
@@ -1445,12 +1440,12 @@ class EventsCog(commands.Cog):
                                 c_ds.close()
                                 conn_ds.close()
 
-                                print(f"[DRAGONSCALE] Logged {dragon_key}x{final_amount}")
+                                logger.info(f"[DRAGONSCALE] Logged {dragon_key}x{final_amount}")
                             except Exception as e:
-                                print(f"[DRAGONSCALE] LOG ERROR: {e}")
+                                logger.error(f"[DRAGONSCALE] LOG ERROR: {e}")
                         else:
                             if guild_id in active_dragonscales:
-                                print(f"[DRAGONSCALE] Event ended or not active")
+                                logger.info(f"[DRAGONSCALE] Event ended or not active")
 
                         # Check Dragonpass quests
                         dragon_rarity_index = list(DRAGON_TYPES.keys()).index(dragon_key)
@@ -1652,7 +1647,8 @@ class EventsCog(commands.Cog):
                                                                (_guild_id, _user_id))
                                                     c2.execute('SELECT level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
                                                                (_guild_id, _user_id))
-                                                    current_level = c2.fetchone()[0]
+                                                    _row = c2.fetchone()
+                                                    current_level = _row[0] if _row else 0
                                                     perk_store_level = current_level + 1 if current_level < 10 else 10
                                                     new_perks = generate_unique_perks(perk_store_level, 3, 0)
                                                     c2.execute('''INSERT OR REPLACE INTO pending_perks (guild_id, user_id, level, perks_json)

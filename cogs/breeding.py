@@ -30,49 +30,49 @@ class BreedingCog(commands.Cog):
         await interaction.response.defer(ephemeral=False)
 
         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
-        c = conn.cursor()
+        try:
+            c = conn.cursor()
 
-        # Check breeding cooldown
-        c.execute('SELECT last_breed, last_breed_rarity FROM breeding_cooldowns WHERE guild_id = ? AND user_id = ?',
-                  (interaction.guild_id, interaction.user.id))
-        cooldown_result = c.fetchone()
+            # Check breeding cooldown
+            c.execute('SELECT last_breed, last_breed_rarity FROM breeding_cooldowns WHERE guild_id = ? AND user_id = ?',
+                      (interaction.guild_id, interaction.user.id))
+            cooldown_result = c.fetchone()
 
-        if cooldown_result:
-            last_breed = cooldown_result[0]
-            last_rarity = cooldown_result[1] if len(cooldown_result) > 1 and cooldown_result[1] else 'common'
-            current_time = int(time.time())
-            time_passed = current_time - last_breed
-            cooldown_duration = BREEDING_COOLDOWNS.get(last_rarity, BREEDING_COOLDOWNS['common'])
+            if cooldown_result:
+                last_breed = cooldown_result[0]
+                last_rarity = cooldown_result[1] if len(cooldown_result) > 1 and cooldown_result[1] else 'common'
+                current_time = int(time.time())
+                time_passed = current_time - last_breed
+                cooldown_duration = BREEDING_COOLDOWNS.get(last_rarity, BREEDING_COOLDOWNS['common'])
 
-            if time_passed < cooldown_duration:
-                time_left = cooldown_duration - time_passed
-                embed = discord.Embed(
-                    title="⏰ Breeding Cooldown",
-                    description=f"Your breeding lab needs to rest!\n\n"
-                                f"Last breed: **{last_rarity.title()}** rarity\n"
-                                f"Time remaining: **{format_time_remaining(time_left)}**\n\n"
-                                f"💡 **Tip:** Higher rarity breeds = longer cooldowns\n"
-                                f"• Common: 30min | Rare: 1h | Legendary: 2h | Ultra: 3h",
-                    color=0xFF6B6B
-                )
-                await interaction.followup.send(embed=embed, ephemeral=False)
-                conn.close()
-                return
+                if time_passed < cooldown_duration:
+                    time_left = cooldown_duration - time_passed
+                    embed = discord.Embed(
+                        title="⏰ Breeding Cooldown",
+                        description=f"Your breeding lab needs to rest!\n\n"
+                                    f"Last breed: **{last_rarity.title()}** rarity\n"
+                                    f"Time remaining: **{format_time_remaining(time_left)}**\n\n"
+                                    f"💡 **Tip:** Higher rarity breeds = longer cooldowns\n"
+                                    f"• Common: 30min | Rare: 1h | Legendary: 2h | Ultra: 3h",
+                        color=0xFF6B6B
+                    )
+                    await interaction.followup.send(embed=embed, ephemeral=False)
+                    return
 
-        # Get user's dragons
-        c.execute('''SELECT dragon_type, count FROM user_dragons
-                     WHERE guild_id = ? AND user_id = ? AND count > 0
-                     ORDER BY dragon_type''',
-                  (interaction.guild_id, interaction.user.id))
-        raw_dragons = c.fetchall()
+            # Get user's dragons
+            c.execute('''SELECT dragon_type, count FROM user_dragons
+                         WHERE guild_id = ? AND user_id = ? AND count > 0
+                         ORDER BY dragon_type''',
+                      (interaction.guild_id, interaction.user.id))
+            raw_dragons = c.fetchall()
 
-        # Check DNA Sample
-        c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
-                  (interaction.guild_id, interaction.user.id, 'dna'))
-        dna_result = c.fetchone()
-        dna_count = dna_result[0] if dna_result else 0
-
-        conn.close()
+            # Check DNA Sample
+            c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
+                      (interaction.guild_id, interaction.user.id, 'dna'))
+            dna_result = c.fetchone()
+            dna_count = dna_result[0] if dna_result else 0
+        finally:
+            conn.close()
 
         # Normalize dragons immediately
         user_dragons = []

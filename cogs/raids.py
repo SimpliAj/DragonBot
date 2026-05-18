@@ -55,9 +55,9 @@ async def update_raid_embed(bot, guild_id, channel_id, user_tier=None):
                 )
 
                 # Calculate participant counts for each tier
-                easy_participants = len(eval(easy_part_str)) if easy_part_str else 0
-                normal_participants = len(eval(normal_part_str)) if normal_part_str else 0
-                hard_participants = len(eval(hard_part_str)) if hard_part_str else 0
+                easy_participants = len(ast.literal_eval(easy_part_str)) if easy_part_str else 0
+                normal_participants = len(ast.literal_eval(normal_part_str)) if normal_part_str else 0
+                hard_participants = len(ast.literal_eval(hard_part_str)) if hard_part_str else 0
 
                 # Easy tier
                 updated_embed.add_field(
@@ -109,11 +109,11 @@ async def update_raid_embed(bot, guild_id, channel_id, user_tier=None):
 
                 await raid_msg.edit(embed=updated_embed)
             except Exception as e:
-                print(f"Error updating raid embed: {e}")
+                logger.error(f"Error updating raid embed: {e}")
 
         conn.close()
     except Exception as e:
-        print(f"Error in update_raid_embed: {e}")
+        logger.error(f"Error in update_raid_embed: {e}")
 
 
 class RaidTierSelectView(discord.ui.View):
@@ -139,91 +139,88 @@ class RaidTierSelectView(discord.ui.View):
 
     async def _join_tier(self, btn_interaction: discord.Interaction, tier: str):
         conn = get_db_connection(120.0)
-        c = conn.cursor()
+        try:
+            c = conn.cursor()
 
-        c.execute('SELECT tier FROM raid_damage WHERE guild_id = ? AND user_id = ?',
-                 (btn_interaction.guild_id, btn_interaction.user.id))
-        existing = c.fetchone()
+            c.execute('SELECT tier FROM raid_damage WHERE guild_id = ? AND user_id = ?',
+                     (btn_interaction.guild_id, btn_interaction.user.id))
+            existing = c.fetchone()
 
-        if existing:
+            if existing:
+                await btn_interaction.response.send_message(
+                    f"❌ You already joined **{existing[0].upper()}** tier! You cannot change.",
+                    ephemeral=True
+                )
+                return
+
+            c.execute('SELECT dragon_type, count FROM user_dragons WHERE guild_id = ? AND user_id = ? AND count > 0',
+                     (btn_interaction.guild_id, btn_interaction.user.id))
+            user_dragons = c.fetchall()
+
+            if not user_dragons:
+                await btn_interaction.response.send_message(
+                    f"❌ You don't have any dragons! Catch some first.",
+                    ephemeral=True
+                )
+                return
+
+            damage_potential = 0
+            for dragon_type, count in user_dragons:
+                dragon_rarity = 'common'
+                for rarity, dragons in DRAGON_RARITY_TIERS.items():
+                    if dragon_type in dragons:
+                        dragon_rarity = rarity
+                        break
+
+                damage_per_dragon = RARITY_DAMAGE[dragon_rarity]
+                damage_potential += count * damage_per_dragon
+
+            c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
+                     (btn_interaction.guild_id, btn_interaction.user.id, 'precisionstone'))
+            stone_result = c.fetchone()
+            precision_stones = stone_result[0] if stone_result else 0
+            precision_bonus = min(precision_stones * 0.05, 0.30)
+            damage_potential = int(damage_potential * (1 + precision_bonus))
+
+            if tier == 'easy' and damage_potential > 10000:
+                await btn_interaction.response.send_message(
+                    f"❌ Your damage potential is **{damage_potential:,}**! Easy tier is for **0-10,000 damage**.\n"
+                    f"Please join Normal or Hard tier.",
+                    ephemeral=True
+                )
+                return
+            elif tier == 'normal' and (damage_potential < 10000 or damage_potential > 70000):
+                await btn_interaction.response.send_message(
+                    f"❌ Your damage potential is **{damage_potential:,}**! Normal tier is for **10,001-70,000 damage**.\n"
+                    f"Please join an appropriate tier.",
+                    ephemeral=True
+                )
+                return
+            elif tier == 'hard' and damage_potential < 70000:
+                await btn_interaction.response.send_message(
+                    f"❌ Your damage potential is only **{damage_potential:,}**! Hard tier requires **70,000+ damage**.\n"
+                    f"Please join Normal tier.",
+                    ephemeral=True
+                )
+                return
+
+            c.execute('''INSERT INTO raid_damage (guild_id, user_id, tier, damage_dealt, attacks_made, last_attack_time)
+                         VALUES (?, ?, ?, 0, 0, 0)
+                         ON CONFLICT(guild_id, user_id) DO UPDATE SET tier = ?''',
+                     (btn_interaction.guild_id, btn_interaction.user.id, tier, tier))
+
+            c.execute(f'SELECT {tier}_participants FROM raid_bosses WHERE guild_id = ? ORDER BY expires_at DESC LIMIT 1', (btn_interaction.guild_id,))
+            result = c.fetchone()
+            if result:
+                participants = ast.literal_eval(result[0]) if result[0] else []
+                if btn_interaction.user.id not in participants:
+                    participants.append(btn_interaction.user.id)
+                    c.execute(f'UPDATE raid_bosses SET {tier}_participants = ? WHERE guild_id = ? AND expires_at = (SELECT MAX(expires_at) FROM raid_bosses WHERE guild_id = ?)',
+                             (str(participants), btn_interaction.guild_id, btn_interaction.guild_id))
+
+            conn.commit()
+        finally:
             conn.close()
-            await btn_interaction.response.send_message(
-                f"❌ You already joined **{existing[0].upper()}** tier! You cannot change.",
-                ephemeral=True
-            )
-            return
-
-        c.execute('SELECT dragon_type, count FROM user_dragons WHERE guild_id = ? AND user_id = ? AND count > 0',
-                 (btn_interaction.guild_id, btn_interaction.user.id))
-        user_dragons = c.fetchall()
-
-        if not user_dragons:
-            conn.close()
-            await btn_interaction.response.send_message(
-                f"❌ You don't have any dragons! Catch some first.",
-                ephemeral=True
-            )
-            return
-
-        damage_potential = 0
-        for dragon_type, count in user_dragons:
-            dragon_rarity = 'common'
-            for rarity, dragons in DRAGON_RARITY_TIERS.items():
-                if dragon_type in dragons:
-                    dragon_rarity = rarity
-                    break
-
-            damage_per_dragon = RARITY_DAMAGE[dragon_rarity]
-            damage_potential += count * damage_per_dragon
-
-        c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
-                 (btn_interaction.guild_id, btn_interaction.user.id, 'precisionstone'))
-        stone_result = c.fetchone()
-        precision_stones = stone_result[0] if stone_result else 0
-        precision_bonus = min(precision_stones * 0.05, 0.30)
-        damage_potential = int(damage_potential * (1 + precision_bonus))
-
-        if tier == 'easy' and damage_potential > 10000:
-            conn.close()
-            await btn_interaction.response.send_message(
-                f"❌ Your damage potential is **{damage_potential:,}**! Easy tier is for **0-10,000 damage**.\n"
-                f"Please join Normal or Hard tier.",
-                ephemeral=True
-            )
-            return
-        elif tier == 'normal' and (damage_potential < 10000 or damage_potential > 70000):
-            conn.close()
-            await btn_interaction.response.send_message(
-                f"❌ Your damage potential is **{damage_potential:,}**! Normal tier is for **10,001-70,000 damage**.\n"
-                f"Please join an appropriate tier.",
-                ephemeral=True
-            )
-            return
-        elif tier == 'hard' and damage_potential < 70000:
-            conn.close()
-            await btn_interaction.response.send_message(
-                f"❌ Your damage potential is only **{damage_potential:,}**! Hard tier requires **70,000+ damage**.\n"
-                f"Please join Normal tier.",
-                ephemeral=True
-            )
-            return
-
-        c.execute('''INSERT INTO raid_damage (guild_id, user_id, tier, damage_dealt, attacks_made, last_attack_time)
-                     VALUES (?, ?, ?, 0, 0, 0)
-                     ON CONFLICT(guild_id, user_id) DO UPDATE SET tier = ?''',
-                 (btn_interaction.guild_id, btn_interaction.user.id, tier, tier))
-
-        c.execute(f'SELECT {tier}_participants FROM raid_bosses WHERE guild_id = ? ORDER BY expires_at DESC LIMIT 1', (btn_interaction.guild_id,))
-        result = c.fetchone()
-        if result:
-            participants = eval(result[0]) if result[0] else []
-            if btn_interaction.user.id not in participants:
-                participants.append(btn_interaction.user.id)
-                c.execute(f'UPDATE raid_bosses SET {tier}_participants = ? WHERE guild_id = ? AND expires_at = (SELECT MAX(expires_at) FROM raid_bosses WHERE guild_id = ?)',
-                         (str(participants), btn_interaction.guild_id, btn_interaction.guild_id))
-
-        conn.commit()
-        conn.close()
 
         # Update main raid embed with new participant count
         await update_raid_embed(self.bot, btn_interaction.guild_id, btn_interaction.channel_id, tier)
@@ -426,7 +423,7 @@ class RaidAttackView(discord.ui.View):
                             # Get participant count
                             c_a.execute(f'SELECT {user_tier}_participants FROM raid_bosses WHERE guild_id = ?', (btn_interaction.guild_id,))
                             part_result = c_a.fetchone()
-                            participants = len(eval(part_result[0])) if part_result and part_result[0] else 0
+                            participants = len(ast.literal_eval(part_result[0])) if part_result and part_result[0] else 0
                             updated_embed.add_field(
                                 name="👥 Participants",
                                 value=f"{participants}",
@@ -469,7 +466,7 @@ class RaidAttackView(discord.ui.View):
 
                             await raid_msg.edit(embed=updated_embed)
                 except Exception as e:
-                    print(f"Error updating raid embed: {e}")
+                    logger.error(f"Error updating raid embed: {e}")
 
         tier_names = {'easy': '🟢 EASY', 'normal': '🟡 NORMAL', 'hard': '🔴 HARD'}
 
@@ -495,7 +492,7 @@ class RaidAttackView(discord.ui.View):
         c_a.execute(f'SELECT {user_tier}_participants FROM raid_bosses WHERE guild_id = ?', (btn_interaction.guild_id,))
         part_result = c_a.fetchone()
         if part_result:
-            participants = eval(part_result[0]) if part_result[0] else []
+            participants = ast.literal_eval(part_result[0]) if part_result[0] else []
             if btn_interaction.user.id not in participants:
                 participants.append(btn_interaction.user.id)
                 c_a.execute(f'UPDATE raid_bosses SET {user_tier}_participants = ? WHERE guild_id = ?',
@@ -536,7 +533,7 @@ class RaidAttackView(discord.ui.View):
                             'hard': (hard_hp_f, hard_max_hp_f, hard_part_f)
                         }
                         tier_hp_f, tier_max_hp_f, tier_part_f = tier_hp_map[user_tier_check]
-                        tier_part = eval(tier_part_f) if tier_part_f else []
+                        tier_part = ast.literal_eval(tier_part_f) if tier_part_f else []
 
                         # Rebuild raidstatus embed with new data
                         hp_percentage = (tier_hp_f / tier_max_hp_f * 100) if tier_max_hp_f > 0 else 0
@@ -590,7 +587,7 @@ class RaidAttackView(discord.ui.View):
 
                         await btn_interaction.message.edit(embed=updated_raidstatus_embed)
             except Exception as e:
-                print(f"Error updating raidstatus message: {e}")
+                logger.error(f"Error updating raidstatus message: {e}")
 
         c_a.execute('SELECT easy_hp, normal_hp, hard_hp, expires_at, reward_dragon, boss_rarity, boss_name FROM raid_bosses WHERE guild_id = ?',
                   (btn_interaction.guild_id,))
@@ -719,9 +716,9 @@ class RaidAttackView(discord.ui.View):
 
                         if raid_info:
                             easy_part_str, normal_part_str, hard_part_str = raid_info
-                            easy_had_players = bool(eval(easy_part_str)) if easy_part_str else False
-                            normal_had_players = bool(eval(normal_part_str)) if normal_part_str else False
-                            hard_had_players = bool(eval(hard_part_str)) if hard_part_str else False
+                            easy_had_players = bool(ast.literal_eval(easy_part_str)) if easy_part_str else False
+                            normal_had_players = bool(ast.literal_eval(normal_part_str)) if normal_part_str else False
+                            hard_had_players = bool(ast.literal_eval(hard_part_str)) if hard_part_str else False
 
                             # Get current HP to see which tiers were actually defeated
                             boss_hp = c_a.execute('SELECT easy_hp, normal_hp, hard_hp FROM raid_bosses WHERE guild_id = ? ORDER BY expires_at DESC LIMIT 1',
@@ -845,9 +842,11 @@ class RaidBossStatusView(discord.ui.View):
             damage = int(damage * (1 + precision_bonus))
 
         # Update HP based on raid type (shared-pool uses normal_hp, tier-based uses tier-specific columns)
+        _hp_update_rowcount = 0
         if is_shared_pool:
-            c_a.execute('UPDATE raid_bosses SET normal_hp = normal_hp - ? WHERE guild_id = ?',
+            c_a.execute('UPDATE raid_bosses SET normal_hp = normal_hp - ? WHERE guild_id = ? AND normal_hp > 0',
                       (damage, btn_interaction.guild_id))
+            _hp_update_rowcount = c_a.rowcount
         else:
             # For tier-based raids, find which tier is active and update it
             c_a.execute('''SELECT easy_hp, normal_hp, hard_hp FROM raid_bosses WHERE guild_id = ?''',
@@ -856,21 +855,24 @@ class RaidBossStatusView(discord.ui.View):
             if hp_result:
                 easy_hp, normal_hp, hard_hp = hp_result
                 if easy_hp > 0:
-                    c_a.execute('UPDATE raid_bosses SET easy_hp = easy_hp - ? WHERE guild_id = ?',
+                    c_a.execute('UPDATE raid_bosses SET easy_hp = easy_hp - ? WHERE guild_id = ? AND easy_hp > 0',
                               (damage, btn_interaction.guild_id))
+                    _hp_update_rowcount = c_a.rowcount
                 elif normal_hp > 0:
-                    c_a.execute('UPDATE raid_bosses SET normal_hp = normal_hp - ? WHERE guild_id = ?',
+                    c_a.execute('UPDATE raid_bosses SET normal_hp = normal_hp - ? WHERE guild_id = ? AND normal_hp > 0',
                               (damage, btn_interaction.guild_id))
+                    _hp_update_rowcount = c_a.rowcount
                 elif hard_hp > 0:
-                    c_a.execute('UPDATE raid_bosses SET hard_hp = hard_hp - ? WHERE guild_id = ?',
+                    c_a.execute('UPDATE raid_bosses SET hard_hp = hard_hp - ? WHERE guild_id = ? AND hard_hp > 0',
                               (damage, btn_interaction.guild_id))
+                    _hp_update_rowcount = c_a.rowcount
 
         # Update participants list if needed (for shared-pool raids)
         if is_shared_pool:
             c_a.execute('SELECT normal_participants FROM raid_bosses WHERE guild_id = ?', (btn_interaction.guild_id,))
             part_result = c_a.fetchone()
             if part_result:
-                participants_list = eval(part_result[0]) if part_result[0] else []
+                participants_list = ast.literal_eval(part_result[0]) if part_result[0] else []
                 if btn_interaction.user.id not in participants_list:
                     participants_list.append(btn_interaction.user.id)
                     c_a.execute('UPDATE raid_bosses SET normal_participants = ? WHERE guild_id = ?',
@@ -913,7 +915,7 @@ class RaidBossStatusView(discord.ui.View):
 
         if is_shared_pool:
             new_hp, max_hp, rarity, expires_at, reward_dragon, participants_str = boss_update
-            participants_list = eval(participants_str) if participants_str else []
+            participants_list = ast.literal_eval(participants_str) if participants_str else []
         else:
             easy_hp, easy_max_hp, normal_hp, normal_max_hp, hard_hp, hard_max_hp, rarity, expires_at, reward_dragon, easy_part_str, normal_part_str, hard_part_str = boss_update
             # Find which tier is active
@@ -926,9 +928,9 @@ class RaidBossStatusView(discord.ui.View):
             else:
                 new_hp, max_hp = hard_hp, hard_max_hp
                 participants_str = hard_part_str
-            participants_list = eval(participants_str) if participants_str else []
+            participants_list = ast.literal_eval(participants_str) if participants_str else []
 
-        if new_hp <= 0:
+        if new_hp <= 0 and _hp_update_rowcount > 0:
             await award_trophy(btn_interaction.client, btn_interaction.guild_id, btn_interaction.user.id, 'raid_destroyer')
             reward_data = DRAGON_TYPES[reward_dragon]
             c_a.execute('SELECT user_id, damage_dealt FROM raid_damage WHERE guild_id = ? ORDER BY damage_dealt DESC LIMIT 10', (btn_interaction.guild_id,))
@@ -1007,7 +1009,8 @@ class RaidBossStatusView(discord.ui.View):
 
             c_a.execute('DELETE FROM raid_bosses WHERE guild_id = ?', (btn_interaction.guild_id,))
             c_a.execute('DELETE FROM raid_damage WHERE guild_id = ?', (btn_interaction.guild_id,))
-            del raid_boss_active[btn_interaction.guild_id]
+            if btn_interaction.guild_id in raid_boss_active:
+                del raid_boss_active[btn_interaction.guild_id]
             conn_a.commit()
             conn_a.close()
 
@@ -1031,8 +1034,6 @@ class RaidBossStatusView(discord.ui.View):
                 pass
             return
 
-        conn_a.close()
-
         hp_percentage = (new_hp / max_hp) * 100
         hp_bar_length = 20
         filled = int((hp_percentage / 100) * hp_bar_length)
@@ -1052,6 +1053,8 @@ class RaidBossStatusView(discord.ui.View):
             await btn_interaction.message.edit(embed=updated_embed, view=self)
         except:
             pass
+        finally:
+            conn_a.close()
 
 
 async def spawn_raid_boss_ritual(bot, guild_id: int, channel: discord.TextChannel):
@@ -1089,14 +1092,6 @@ async def spawn_raid_boss_ritual(bot, guild_id: int, channel: discord.TextChanne
 
     # Use the configured spawn channel instead of the current channel
     channel = spawn_channel
-
-    # Set up raid_boss_active FIRST before processing
-    raid_boss_active[guild_id] = {
-        'active': True,
-        'spawn_time': current_time,
-        'despawn_time': current_time + (4 * 60 * 60),  # 4 hours
-        'manual_spawn': True
-    }
 
     boss_rarity = ritual['boss_rarity']
     ritual_difficulty = ritual['difficulty']  # easy, normal, or hard (affects HP scaling)
@@ -1162,6 +1157,14 @@ async def spawn_raid_boss_ritual(bot, guild_id: int, channel: discord.TextChanne
 
     conn.commit()
     conn.close()
+
+    # Only set in-memory state after DB commit succeeds
+    raid_boss_active[guild_id] = {
+        'active': True,
+        'spawn_time': current_time,
+        'despawn_time': current_time + (4 * 60 * 60),
+        'manual_spawn': True
+    }
 
     # Send raid boss spawn message
     difficulty_names = {'easy': '🟢 EASY', 'normal': '🟡 NORMAL', 'hard': '🔴 HARD'}
@@ -1570,7 +1573,7 @@ class RaidsCog(commands.Cog):
 
                     cancelled_embed = discord.Embed(
                         title="❌ Ritual Cancelled",
-                        description=f"The {ritual['rarity'].upper()} ritual has been cancelled.\n\n"
+                        description=f"The {ritual['boss_rarity'].upper()} ritual has been cancelled.\n\n"
                                     f"🐉 All {ritual['donated']} donated dragons have been returned to their owners.",
                         color=discord.Color.red()
                     )
@@ -1648,7 +1651,7 @@ class RaidsCog(commands.Cog):
         # SHARED POOL RAIDS: Everyone fights the same boss, no tier selection
         if is_shared_pool:
             # Show shared pool raid boss to everyone (donors and non-donors alike)
-            normal_part = eval(normal_part_str) if normal_part_str else []
+            normal_part = ast.literal_eval(normal_part_str) if normal_part_str else []
 
             hp_percentage = (normal_hp / normal_max_hp) * 100 if normal_max_hp > 0 else 0
             hp_bar_length = 20
@@ -1709,9 +1712,9 @@ class RaidsCog(commands.Cog):
         # TIER-BASED RAIDS: Players choose which tier to join
         if not user_tier_data:
             # User hasn't joined a tier yet - show the raid spawn embed with tier selection
-            easy_part = eval(easy_part_str) if easy_part_str else []
-            normal_part = eval(normal_part_str) if normal_part_str else []
-            hard_part = eval(hard_part_str) if hard_part_str else []
+            easy_part = ast.literal_eval(easy_part_str) if easy_part_str else []
+            normal_part = ast.literal_eval(normal_part_str) if normal_part_str else []
+            hard_part = ast.literal_eval(hard_part_str) if hard_part_str else []
 
             reward_data = DRAGON_TYPES[reward_dragon]
 
@@ -1789,7 +1792,7 @@ class RaidsCog(commands.Cog):
         }
 
         tier_hp, tier_max_hp, tier_part_str = tier_hp_data[user_tier]
-        tier_part = eval(tier_part_str) if tier_part_str else []
+        tier_part = ast.literal_eval(tier_part_str) if tier_part_str else []
 
         # Check if defeated
         if tier_hp <= 0:
