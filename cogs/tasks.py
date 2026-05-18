@@ -468,9 +468,20 @@ class TasksCog(commands.Cog):
         for guild in self.bot.guilds:
             guild_id = guild.id
 
-            # Skip if already has active spawn
+            # Skip if already has active spawn (clear stale spawns older than 20 min)
             if guild_id in active_spawns:
-                continue
+                spawn_age = int(time.time()) - active_spawns[guild_id].get('timestamp', int(time.time()))
+                if spawn_age > 1200:
+                    del active_spawns[guild_id]
+                    try:
+                        _c = sqlite3.connect('dragon_bot.db', timeout=10)
+                        _c.execute('DELETE FROM active_dragon_spawns WHERE guild_id = ?', (guild_id,))
+                        _c.commit()
+                        _c.close()
+                    except Exception:
+                        pass
+                else:
+                    continue
 
             # Check if spawn channel is set
             channel_id = get_spawn_channel(guild_id)

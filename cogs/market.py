@@ -1253,7 +1253,7 @@ class MarketCog(commands.Cog):
                         break
 
                 if not selected_item:
-                    await interaction.response.send_message("❌ Item not found!", ephemeral=False)
+                    await interaction.followup.send("❌ Item not found!")
                     return
 
                 # Show amount selection
@@ -1308,7 +1308,7 @@ class MarketCog(commands.Cog):
                 amount_view = discord.ui.View()
                 amount_view.add_item(amount_select)
 
-                await interaction.response.send_message(embed=embed, view=amount_view, ephemeral=False)
+                await interaction.followup.send(embed=embed, view=amount_view)
 
             async def select_theirs_callback(self, interaction: discord.Interaction, your_item):
                 await interaction.response.defer()
@@ -1326,7 +1326,7 @@ class MarketCog(commands.Cog):
                         break
 
                 if not selected_theirs:
-                    await interaction.response.send_message("❌ Item not found!", ephemeral=False)
+                    await interaction.followup.send("❌ Item not found!")
                     return
 
                 # Show amount selection for their item
@@ -1357,7 +1357,7 @@ class MarketCog(commands.Cog):
                 their_amount_view = discord.ui.View()
                 their_amount_view.add_item(their_amount_select)
 
-                await interaction.response.send_message(embed=embed, view=their_amount_view, ephemeral=False)
+                await interaction.followup.send(embed=embed, view=their_amount_view)
 
         async def create_trade_offer(init_inter, your_key, your_amount, their_key, their_amount, your_item_data, their_item_data):
             """Create and send the trade offer"""
