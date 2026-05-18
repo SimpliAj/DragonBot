@@ -1639,26 +1639,28 @@ class EventsCog(commands.Cog):
                                                     await btn_inter.response.send_message("This is not your action!", ephemeral=True)
                                                     return
                                                 await btn_inter.response.defer()
+                                                from config import generate_unique_perks
                                                 conn2 = sqlite3.connect('dragon_bot.db', timeout=120.0)
-                                                c2 = conn2.cursor()
-                                                for dt, cnt in _sacrifice_list.items():
-                                                    c2.execute('UPDATE user_dragons SET count = count - ? WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
-                                                               (cnt, _guild_id, _user_id, dt))
-                                                c2.execute('UPDATE dragon_nest SET level = ? WHERE guild_id = ? AND user_id = ?',
-                                                           (_new_level, _guild_id, _user_id))
-                                                c2.execute('DELETE FROM pending_perks WHERE guild_id = ? AND user_id = ?',
-                                                           (_guild_id, _user_id))
-                                                c2.execute('SELECT level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
-                                                           (_guild_id, _user_id))
-                                                current_level = c2.fetchone()[0]
-                                                from utils import generate_unique_perks
-                                                perk_store_level = current_level + 1 if current_level < 10 else 10
-                                                new_perks = generate_unique_perks(perk_store_level, 3, 0)
-                                                c2.execute('''INSERT OR REPLACE INTO pending_perks (guild_id, user_id, level, perks_json)
-                                                              VALUES (?, ?, ?, ?)''',
-                                                           (_guild_id, _user_id, perk_store_level, json.dumps({'selected_perks': new_perks})))
-                                                conn2.commit()
-                                                conn2.close()
+                                                try:
+                                                    c2 = conn2.cursor()
+                                                    for dt, cnt in _sacrifice_list.items():
+                                                        c2.execute('UPDATE user_dragons SET count = count - ? WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
+                                                                   (cnt, _guild_id, _user_id, dt))
+                                                    c2.execute('UPDATE dragon_nest SET level = ? WHERE guild_id = ? AND user_id = ?',
+                                                               (_new_level, _guild_id, _user_id))
+                                                    c2.execute('DELETE FROM pending_perks WHERE guild_id = ? AND user_id = ?',
+                                                               (_guild_id, _user_id))
+                                                    c2.execute('SELECT level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
+                                                               (_guild_id, _user_id))
+                                                    current_level = c2.fetchone()[0]
+                                                    perk_store_level = current_level + 1 if current_level < 10 else 10
+                                                    new_perks = generate_unique_perks(perk_store_level, 3, 0)
+                                                    c2.execute('''INSERT OR REPLACE INTO pending_perks (guild_id, user_id, level, perks_json)
+                                                                  VALUES (?, ?, ?, ?)''',
+                                                               (_guild_id, _user_id, perk_store_level, json.dumps({'selected_perks': new_perks})))
+                                                    conn2.commit()
+                                                finally:
+                                                    conn2.close()
                                                 if current_level == 10:
                                                     from achievements import award_trophy
                                                     await award_trophy(_bot, _guild_id, _user_id, 'nest_master')

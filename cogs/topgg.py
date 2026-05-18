@@ -367,7 +367,11 @@ class TopggCog(commands.Cog):
 
         try:
             await user.send(embed=embed)
-        except discord.Forbidden:
+        except discord.HTTPException as e:
+            if e.code == 40003:
+                logger.warning(f"DM rate limited for user {user.id}, skipping vote DM")
+                return
+            # Forbidden (DMs disabled) → fall back to spawn channel
             from utils import get_spawn_channel
             channel_id = get_spawn_channel(user.guild.id)
             if channel_id:
