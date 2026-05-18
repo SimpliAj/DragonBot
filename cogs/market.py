@@ -1239,11 +1239,12 @@ class MarketCog(commands.Cog):
 
             async def select_yours_callback(self, interaction: discord.Interaction):
                 await interaction.response.defer()
-                if not hasattr(interaction, 'values') or not interaction.values:
+                selected_values = (interaction.data or {}).get('values', [])
+                if not selected_values:
                     await interaction.followup.send("❌ Please select an item!", ephemeral=True)
                     return
 
-                selected_value = interaction.values[0]  # e.g. "yours_dragon_stone"
+                selected_value = selected_values[0]  # e.g. "yours_dragon_stone"
 
                 # Find selected item by matching full value
                 selected_item = None
@@ -1312,11 +1313,12 @@ class MarketCog(commands.Cog):
 
             async def select_theirs_callback(self, interaction: discord.Interaction, your_item):
                 await interaction.response.defer()
-                if not hasattr(interaction, 'values') or not interaction.values:
+                selected_values = (interaction.data or {}).get('values', [])
+                if not selected_values:
                     await interaction.followup.send("❌ Please select an item!", ephemeral=True)
                     return
 
-                selected_value = interaction.values[0]  # e.g. "theirs_dragon_stone"
+                selected_value = selected_values[0]  # e.g. "theirs_dragon_stone"
 
                 # Find selected item by matching full value
                 selected_theirs = None

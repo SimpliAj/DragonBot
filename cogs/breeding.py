@@ -867,7 +867,8 @@ class BreedingCog(commands.Cog):
 
                 async def cancel_selected(self, inter: discord.Interaction):
                     try:
-                        queue_id = int(inter.values[0] if hasattr(inter, 'values') and inter.values else 0)
+                        _vals = (inter.data or {}).get('values', [])
+                        queue_id = int(_vals[0] if _vals else 0)
                     except (ValueError, IndexError):
                         await inter.followup.send("❌ Please select a valid queue item!", ephemeral=True)
                         return
