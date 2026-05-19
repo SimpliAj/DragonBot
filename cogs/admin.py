@@ -42,9 +42,9 @@ class AdminCog(commands.Cog):
     @app_commands.command(name="setchannel", description="Set current channel as dragon spawn channel (Admin only)")
     async def setchannel(self, interaction: discord.Interaction):
         perms = interaction.user.guild_permissions
-        is_owner = interaction.guild.owner_id == interaction.user.id
-        if not (perms.administrator or perms.manage_guild or is_owner):
-            await interaction.response.send_message("❌ You need administrator permissions!", ephemeral=False)
+        is_owner = interaction.guild is not None and interaction.guild.owner_id == interaction.user.id
+        if not (perms.administrator or perms.manage_guild or perms.manage_channels or is_owner):
+            await interaction.response.send_message("❌ You need Manage Server or Manage Channels permissions!", ephemeral=True)
             return
 
         # Check if channel name contains "cat" (people confusing bots)

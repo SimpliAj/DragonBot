@@ -487,6 +487,17 @@ class TasksCog(commands.Cog):
             if guild_id in active_spawns:
                 spawn_age = int(time.time()) - active_spawns[guild_id].get('timestamp', int(time.time()))
                 if spawn_age > 1200:
+                    # Delete the stale discord message so it doesn't pile up
+                    old_msg_id = active_spawns[guild_id].get('message_id')
+                    old_ch_id = active_spawns[guild_id].get('channel_id')
+                    if old_msg_id and old_ch_id:
+                        try:
+                            old_ch = self.bot.get_channel(old_ch_id)
+                            if old_ch:
+                                old_msg = await old_ch.fetch_message(old_msg_id)
+                                await old_msg.delete()
+                        except Exception:
+                            pass
                     del active_spawns[guild_id]
                     try:
                         _c = sqlite3.connect('dragon_bot.db', timeout=10)
