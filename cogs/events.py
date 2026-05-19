@@ -20,7 +20,7 @@ from config import (
     DEV_USER_ID, DRAGON_RARITY_TIERS, DRAGON_TYPES, DRAGONNEST_UPGRADES,
     ERROR_WEBHOOK_URL, LEVEL_NAMES, PACK_TYPES,
 )
-from achievements import award_trophy, send_quest_notification
+from achievements import award_trophy, check_and_award_achievements, send_quest_notification
 from database import get_user, get_user_async, init_db, is_player_softlocked, update_balance, update_balance_and_check_trophies
 from state import (
     active_dragonscales, active_dragonfest, active_luckycharms,
@@ -96,6 +96,9 @@ async def spawn_dragon(guild_id: int, channel, bot=None, catcher_id: int = None)
     dragon_rarity = get_dragon_rarity(dragon_key)
     embed.set_footer(text=f"Coins: {displayed_coins} 🪙¦ Rarity: {dragon_rarity.capitalize()} ({dragon_data['spawn_chance']:.2f}%)")
 
+    if channel is None:
+        logger.error(f"spawn_dragon: channel is None for guild {guild_id}")
+        return
     msg = await channel.send(embed=embed)
 
     spawn_ts = int(time.time())

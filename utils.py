@@ -71,7 +71,7 @@ def sort_dragons_by_rarity(dragons: list) -> list:
 # ==================== DRAGON MANAGEMENT ====================
 async def add_dragons(guild_id: int, user_id: int, dragon_type: str, count: int):
     """Add dragons to user inventory with retry logic."""
-    if not validate_dragon_count(count) or not validate_dragon_type(dragon_type):
+    if not isinstance(count, int) or count == 0 or not validate_dragon_type(dragon_type):
         logger.error(f"Invalid input: count={count}, dragon_type={dragon_type}")
         return False
 
