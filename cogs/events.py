@@ -904,7 +904,14 @@ class EventsCog(commands.Cog):
             c.execute('CREATE TABLE IF NOT EXISTS dragon_catch_log (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, user_id INTEGER, dragon_type TEXT, caught_at INTEGER)')
             c.execute('SELECT guild_id, spawn_channel_id FROM spawn_config')
             for guild_id, channel_id in c.fetchall():
-                spawn_channels[guild_id] = channel_id
+                if channel_id is not None:
+                    spawn_channels[guild_id] = channel_id
+
+            # Fill in from guild_settings for any guild not yet in spawn_channels
+            c.execute('SELECT guild_id, spawn_channel FROM guild_settings WHERE spawn_channel IS NOT NULL')
+            for guild_id, channel_id in c.fetchall():
+                if guild_id not in spawn_channels and channel_id:
+                    spawn_channels[guild_id] = channel_id
 
             c.execute('SELECT guild_id, user_id, premium_until FROM premium_users')
             current_time = int(time.time())
