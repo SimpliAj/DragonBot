@@ -1291,576 +1291,592 @@ class EventsCog(commands.Cog):
                     dragon_key = spawn_data['dragon_type']
                     dragon_data = DRAGON_TYPES[dragon_key]
                     item_boost_message = ""
-
-                    # Check for Night Vision
-                    if get_active_item(guild_id, message.author.id, 'night_vision'):
-                        current_hour = datetime.now().hour
-                        is_nighttime = current_hour >= 20 or current_hour < 8
-
-                        if is_nighttime and random.random() < 0.5:
-                            night_dragon_key, night_dragon_data = get_higher_rarity_dragon(min_value=dragon_data['value'])
-                            dragon_key = night_dragon_key
-                            dragon_data = night_dragon_data
-                            item_boost_message = "\n🌙 **Night Vision triggered!** Higher rarity dragon found!"
-                        elif not is_nighttime:
-                            item_boost_message = "\n🌙 **Night Vision** (inactive - only works 20:00-08:00)"
-
-                    catch_time = time.time() - spawn_data['timestamp']
-
-                    # Record discovery if first time caught in server
-                    conn = get_db_connection()
-                    c = conn.cursor()
-                    c.execute('SELECT dragon_type FROM server_discoveries WHERE guild_id = ? AND dragon_type = ?',
-                              (guild_id, dragon_key))
-                    discovery = c.fetchone()
-                    if not discovery:
-                        c.execute('''INSERT INTO server_discoveries (guild_id, dragon_type, first_discovered_by, first_discovered_at, total_caught)
-                                     VALUES (?, ?, ?, ?, 1)''',
-                                  (guild_id, dragon_key, message.author.id, int(time.time())))
-                    else:
-                        c.execute('UPDATE server_discoveries SET total_caught = total_caught + 1 WHERE guild_id = ? AND dragon_type = ?',
-                                  (guild_id, dragon_key))
-
-                    # Update catch time records
-                    c.execute('SELECT fastest_catch, slowest_catch FROM user_dragons WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
-                              (guild_id, message.author.id, dragon_key))
-                    catch_record = c.fetchone()
-
-                    if catch_record:
-                        fastest = catch_record[0] if catch_record[0] > 0 else catch_time
-                        slowest = catch_record[1] if catch_record[1] > 0 else catch_time
-
-                        if catch_time < fastest:
-                            fastest = catch_time
-                        if catch_time > slowest:
-                            slowest = catch_time
-
-                        c.execute('''UPDATE user_dragons SET fastest_catch = ?, slowest_catch = ?
-                                     WHERE guild_id = ? AND user_id = ? AND dragon_type = ?''',
-                                  (fastest, slowest, guild_id, message.author.id, dragon_key))
-                    else:
-                        c.execute('''INSERT INTO user_dragons (guild_id, user_id, dragon_type, count, fastest_catch, slowest_catch)
-                                     VALUES (?, ?, ?, 0, ?, ?)''',
-                                  (guild_id, message.author.id, dragon_key, catch_time, catch_time))
-
-                    conn.commit()
-                    conn.close()
-
-                    # Apply perks
-                    base_amount = 1
-                    final_amount, pack_rewards, time_bonus, perks_applied = apply_perks(guild_id, message.author.id, base_amount, dragon_key)
-
-                    # Apply items (Night Vision, Dragon Magnet)
-                    final_amount = apply_items(guild_id, message.author.id, final_amount)
-
-                    # Apply Knowledge Book passive bonus (+2% catch per book)
-                    knowledge_bonus = get_passive_bonus(guild_id, message.author.id, 'catch')
-                    if knowledge_bonus > 0:
-                        final_amount = int(final_amount * (1 + knowledge_bonus))
-                        perks_applied.append(f"📚 Knowledge Book (+{int(knowledge_bonus*100)}% boost)")
-
-                    # Apply Lucky Charm (2x catch rate)
-                    current_time = int(time.time())
-                    if guild_id in active_luckycharms and message.author.id in active_luckycharms[guild_id]:
-                        if active_luckycharms[guild_id][message.author.id] > current_time:
-                            final_amount *= 2
-                            perks_applied.append(f"🍀 Lucky Charm (doubled!)")
-
-                    # Check for Alpha Dragon server-wide effects
-                    alpha_effect_triggered = False
-                    alpha_owner_name = None
-                    alpha_dragon_name = None
-                    alpha_multiplier = 1
-                    dragonscale_event_minutes = 0
-
-                    conn = get_db_connection()
-                    c = conn.cursor()
-
-                    c.execute('''SELECT u.user_id, u.name FROM user_alphas u
-                                 WHERE u.guild_id = ?''', (guild_id,))
-                    all_alphas = c.fetchall()
-
-                    if all_alphas and random.random() < 0.05:
-                        alpha_owner_id, alpha_name = random.choice(all_alphas)
-                        alpha_owner = message.guild.get_member(alpha_owner_id)
-
-                        if random.random() < 0.95:
-                            rng = random.random()
-                            if rng < 0.75:
-                                alpha_multiplier = 2
-                            else:
-                                alpha_multiplier = 3
-                            final_amount *= alpha_multiplier
-                            alpha_effect_triggered = True
-                            alpha_owner_name = alpha_owner.display_name if alpha_owner else "Unknown"
-                            alpha_dragon_name = alpha_name
-                        else:
-                            dragonscale_event_minutes = 0.5
-                            dragonscale_event_seconds = 30
-
-                            if guild_id not in active_dragonscales or active_dragonscales[guild_id] <= current_time:
-                                active_dragonscales[guild_id] = current_time + dragonscale_event_seconds
-                                dragonscale_event_starts[guild_id] = current_time
-                            else:
-                                active_dragonscales[guild_id] += dragonscale_event_seconds
-
-                            conn.commit()
-                            alpha_effect_triggered = True
-                            alpha_owner_name = alpha_owner.display_name if alpha_owner else "Unknown"
-                            alpha_dragon_name = alpha_name
-
-                    # Add dragons and coins to user
-                    if final_amount > 0:
-                        await add_dragons(guild_id, message.author.id, dragon_key, final_amount)
-                        bingo_just_completed = update_bingo_on_catch(guild_id, message.author.id, dragon_key)
-                        base_coins = max(2, int(dragon_data['value'] * final_amount))
-                        coins_earned = base_coins
-
-                        c.execute('SELECT COUNT(*) FROM user_alphas WHERE guild_id = ?', (guild_id,))
-                        server_alpha_count = c.fetchone()[0]
-
-                        c.execute('SELECT COUNT(*) FROM user_alphas WHERE guild_id = ? AND user_id = ?', (guild_id, message.author.id))
-                        user_alpha_count = c.fetchone()[0]
-
-                        server_coin_bonus = server_alpha_count * 0.08
-                        user_coin_bonus = user_alpha_count * 0.15
-                        total_coin_multiplier = 1 + server_coin_bonus + user_coin_bonus
-                        coins_earned = int(coins_earned * total_coin_multiplier)
-                        alpha_coin_bonus = coins_earned - base_coins
-
-                        # Gold Rush: +50% coin bonus if active
-                        from utils import get_active_item as _get_active_item
-                        if _get_active_item(guild_id, message.author.id, 'gold_rush'):
-                            coins_earned = int(coins_earned * 1.5)
-
-                        await update_balance_and_check_trophies(self.bot, guild_id, message.author.id, coins_earned)
-
-                        # Track dragonfest catches if active
-                        dragonfest_data = active_dragonfest.get(guild_id)
-                        if dragonfest_data and (isinstance(dragonfest_data, dict) and dragonfest_data['end'] > current_time or isinstance(dragonfest_data, int) and dragonfest_data > current_time):
-                            dragonfest_data = active_dragonfest.get(guild_id)
-                            if isinstance(dragonfest_data, dict):
-                                event_start = dragonfest_data['start']
-                            else:
-                                event_start = current_time
-
-                            try:
-                                conn_df = get_db_connection()
-                                c_df = conn_df.cursor()
-
-                                c_df.execute('''INSERT INTO dragonfest_event_log
-                                               (guild_id, user_id, event_start, dragon_type, amount, caught_at)
-                                               VALUES (?, ?, ?, ?, ?, ?)''',
-                                            (guild_id, message.author.id, event_start, dragon_key, final_amount, int(time.time())))
-
-                                c_df.close()
-                                conn_df.close()
-
-                                logger.info(f"[DRAGONFEST] Logged {dragon_key}x{final_amount}")
-                            except Exception as e:
-                                logger.error(f"[DRAGONFEST] LOG ERROR: {e}")
-
-                        # Track dragonscale catches if active
-                        if guild_id in active_dragonscales and active_dragonscales[guild_id] > current_time:
-                            event_start = dragonscale_event_starts.get(guild_id, current_time)
-
-                            try:
-                                conn_ds = get_db_connection()
-                                c_ds = conn_ds.cursor()
-
-                                c_ds.execute('''INSERT INTO dragonscale_event_log
-                                               (guild_id, user_id, event_start, dragon_type, amount, caught_at)
-                                               VALUES (?, ?, ?, ?, ?, ?)''',
-                                            (guild_id, message.author.id, event_start, dragon_key, final_amount, int(time.time())))
-
-                                c_ds.close()
-                                conn_ds.close()
-
-                                logger.info(f"[DRAGONSCALE] Logged {dragon_key}x{final_amount}")
-                            except Exception as e:
-                                logger.error(f"[DRAGONSCALE] LOG ERROR: {e}")
-                        else:
-                            if guild_id in active_dragonscales:
-                                logger.info(f"[DRAGONSCALE] Event ended or not active")
-
-                        # Check Dragonpass quests
-                        dragon_rarity_index = list(DRAGON_TYPES.keys()).index(dragon_key)
-                        is_rare = dragon_rarity_index >= 6
-
-                        conn_dp = get_db_connection()
-                        c_dp = conn_dp.cursor()
-                        c_dp.execute('SELECT level FROM dragonpass WHERE guild_id = ? AND user_id = ?', (guild_id, message.author.id))
-                        dp_result = c_dp.fetchone()
-                        current_dp_level = dp_result[0] if dp_result else 0
-                        conn_dp.close()
-
-                        result = await asyncio.to_thread(check_dragonpass_quests, guild_id, message.author.id, 'catch_dragon', final_amount, dragon_key, catch_time)
-                        _r2 = await asyncio.to_thread(check_dragonpass_quests, guild_id, message.author.id, 'earn_coins', int(coins_earned))
-                        _pending_quest_notifications = []
-                        if result:
-                            coins, level_delta, trophies, quest_info = result
-                            for _tid in trophies:
-                                await award_trophy(self.bot, guild_id, message.author.id, _tid)
-                            if quest_info:
-                                _pending_quest_notifications.append(quest_info)
-                        if _r2 and _r2[3]:
-                            _pending_quest_notifications.append(_r2[3])
-
-                        if result and result[1] > 0:
-                            level_up_count = result[1]
-                            new_level = current_dp_level + level_up_count
-
-                            if new_level <= 10:
-                                pack_type = 'stone' if new_level % 2 == 0 else 'wooden'
-                            elif new_level <= 20:
-                                pack_type = 'silver' if new_level % 2 == 0 else 'bronze'
-                            else:
-                                pack_type = 'diamond' if new_level % 2 == 0 else 'gold'
-
-                            pack_data = PACK_TYPES.get(pack_type, {})
-
-                            levelup_embed = discord.Embed(
-                                title="🎉 Dragonpass Level Up!",
-                                description=f"{message.author.mention} has reached **Level {new_level}** in the Dragonpass!",
-                                color=0xFFD700
-                            )
-
-                            levelup_embed.add_field(
-                                name="🎁 Reward Earned",
-                                value=f"**{pack_data.get('name', pack_type.capitalize())} Pack**\n{pack_data.get('emoji', '📦')}",
-                                inline=True
-                            )
-
-                            levelup_embed.add_field(
-                                name="⭐ Progress",
-                                value=f"Level {new_level}/30",
-                                inline=True
-                            )
-
-                            await message.channel.send(embed=levelup_embed)
-
-                        # Check and update Dragon Nest bounties
+                    _catch_embed_sent = False
+                    try:
+    
+                        # Check for Night Vision
+                        if get_active_item(guild_id, message.author.id, 'night_vision'):
+                            current_hour = datetime.now().hour
+                            is_nighttime = current_hour >= 20 or current_hour < 8
+    
+                            if is_nighttime and random.random() < 0.5:
+                                night_dragon_key, night_dragon_data = get_higher_rarity_dragon(min_value=dragon_data['value'])
+                                dragon_key = night_dragon_key
+                                dragon_data = night_dragon_data
+                                item_boost_message = "\n🌙 **Night Vision triggered!** Higher rarity dragon found!"
+                            elif not is_nighttime:
+                                item_boost_message = "\n🌙 **Night Vision** (inactive - only works 20:00-08:00)"
+    
+                        catch_time = time.time() - spawn_data['timestamp']
+    
+                        # Record discovery if first time caught in server
                         conn = get_db_connection()
                         c = conn.cursor()
-
-                        c.execute('SELECT expires_at FROM raid_bosses WHERE guild_id = ? AND expires_at > ?',
-                                  (guild_id, int(time.time())))
-                        raid_active = c.fetchone()
-
-                        c.execute('SELECT active_until FROM dragon_nest_active WHERE guild_id = ? AND user_id = ?',
-                                  (guild_id, message.author.id))
-                        active_result = c.fetchone()
-
-                        if active_result and active_result[0] > int(time.time()) and not raid_active:
-                            c.execute('SELECT bounties_active, speedrun_catches, level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
-                                      (guild_id, message.author.id))
-                            nest_result = c.fetchone()
-
-                            if nest_result and nest_result[0]:
-                                import ast
-                                bounties = ast.literal_eval(nest_result[0])
-                                speedrun_catches = nest_result[1]
-                                nest_level = nest_result[2]
-
-                                bounties_completed = 0
-                                _rarity_order = {'common': 0, 'uncommon': 1, 'rare': 2, 'epic': 3, 'legendary': 4, 'mythic': 5, 'ultra': 6}
-                                dragon_rarity_level = 0
-                                for _rarity, _dragons in DRAGON_RARITY_TIERS.items():
-                                    if dragon_key in _dragons:
-                                        dragon_rarity_level = _rarity_order.get(_rarity, 0)
-                                        break
-
-                                for bounty in bounties:
-                                    if bounty['type'] == 'catch_any':
-                                        bounty['progress'] = min(bounty['progress'] + final_amount, bounty['target'])
-                                    elif bounty['type'] == 'catch_rarity_or_higher' and bounty.get('rarity_level') and dragon_rarity_level >= bounty['rarity_level']:
-                                        bounty['progress'] = min(bounty['progress'] + final_amount, bounty['target'])
-
-                                    if bounty['progress'] >= bounty['target']:
-                                        bounties_completed += 1
-
-                                new_speedrun = speedrun_catches + final_amount
-
-                                c.execute('UPDATE dragon_nest SET bounties_active = ?, speedrun_catches = ? WHERE guild_id = ? AND user_id = ?',
-                                          (str(bounties), new_speedrun, guild_id, message.author.id))
-
-                                total_bounties = len(bounties)
-                                if bounties_completed >= total_bounties:
-                                    c.execute('UPDATE dragon_nest SET bounties_completed = bounties_completed + 1 WHERE guild_id = ? AND user_id = ?',
-                                              (guild_id, message.author.id))
-
-                                    if nest_level < 10:
-                                        new_level = nest_level + 1
-
-                                        c.execute('SELECT SUM(count) FROM user_dragons WHERE guild_id = ? AND user_id = ?',
-                                                 (guild_id, message.author.id))
-                                        total_dragons_result = c.fetchone()
-                                        total_dragons = total_dragons_result[0] if total_dragons_result and total_dragons_result[0] else 0
-
-                                        if new_level <= 3:
-                                            sacrifice_percentage = 0.10
-                                        elif new_level <= 6:
-                                            sacrifice_percentage = 0.15
-                                        else:
-                                            sacrifice_percentage = 0.20
-
-                                        dragons_to_sacrifice = max(1, int(total_dragons * sacrifice_percentage))
-
-                                        c.execute('SELECT dragon_type, count FROM user_dragons WHERE guild_id = ? AND user_id = ? AND count > 0',
-                                                 (guild_id, message.author.id))
-                                        user_dragons_list = c.fetchall()
-
-                                        sacrifice_list = {}
-                                        dragons_needed = dragons_to_sacrifice
-
-                                        import random as py_random
-                                        user_dragons_list_shuffled = list(user_dragons_list)
-                                        py_random.shuffle(user_dragons_list_shuffled)
-
-                                        for dragon_type, available_count in user_dragons_list_shuffled:
-                                            if dragons_needed <= 0:
-                                                break
-                                            take_count = min(available_count, dragons_needed)
-                                            sacrifice_list[dragon_type] = take_count
-                                            dragons_needed -= take_count
-
-                                        sacrifice_display = ""
-                                        for dragon_type, count in sacrifice_list.items():
-                                            dragon_data_s = DRAGON_TYPES[dragon_type]
-                                            sacrifice_display += f"{dragon_data_s['emoji']} **{count}x {dragon_data_s['name']}**\n"
-
-                                        c.execute('''INSERT OR REPLACE INTO pending_perks (guild_id, user_id, level, perks_json)
-                                                     VALUES (?, ?, ?, ?)''',
-                                                  (guild_id, message.author.id, new_level, json.dumps({
-                                                      'sacrifice_list': sacrifice_list,
-                                                      'new_level': new_level
-                                                  })))
-
-                                        c.execute('UPDATE dragon_nest SET bounties_active = NULL, speedrun_catches = 0 WHERE guild_id = ? AND user_id = ?',
-                                                  (guild_id, message.author.id))
-
-                                        c.execute('DELETE FROM dragon_nest_active WHERE guild_id = ? AND user_id = ?',
-                                                  (guild_id, message.author.id))
-
-                                        conn.commit()
-
-                                        embed = discord.Embed(
-                                            title="🎉 Dragon Nest Level Complete!",
-                                            description=f"You completed all bounties and reached **Level {new_level}: {LEVEL_NAMES.get(new_level, 'Unknown')}**!\n\n"
-                                                        f"🐉 **Dragons to Sacrifice:**\n{sacrifice_display}\n"
-                                                        f"Click **Submit Dragons** to confirm and unlock your perk reward!",
-                                            color=discord.Color.green()
-                                        )
-
-                                        _guild_id = guild_id
-                                        _user_id = message.author.id
-                                        _sacrifice_list = sacrifice_list
-                                        _new_level = new_level
-                                        _bot = self.bot
-
-                                        class _NestSacrificeView(discord.ui.View):
-                                            def __init__(self):
-                                                super().__init__(timeout=300)
-                                                btn = discord.ui.Button(label="💾 Submit Dragons", style=discord.ButtonStyle.success)
-                                                btn.callback = self.submit_dragons
-                                                self.add_item(btn)
-
-                                            async def submit_dragons(self, btn_inter: discord.Interaction):
-                                                if btn_inter.user.id != _user_id:
-                                                    await btn_inter.response.send_message("This is not your action!", ephemeral=True)
-                                                    return
-                                                await btn_inter.response.defer()
-                                                from config import generate_unique_perks
-                                                conn2 = get_db_connection()
-                                                try:
-                                                    c2 = conn2.cursor()
-                                                    for dt, cnt in _sacrifice_list.items():
-                                                        c2.execute('UPDATE user_dragons SET count = count - ? WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
-                                                                   (cnt, _guild_id, _user_id, dt))
-                                                    c2.execute('UPDATE dragon_nest SET level = ? WHERE guild_id = ? AND user_id = ?',
-                                                               (_new_level, _guild_id, _user_id))
-                                                    c2.execute('DELETE FROM pending_perks WHERE guild_id = ? AND user_id = ?',
-                                                               (_guild_id, _user_id))
-                                                    c2.execute('SELECT level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
-                                                               (_guild_id, _user_id))
-                                                    _row = c2.fetchone()
-                                                    current_level = _row[0] if _row else 0
-                                                    perk_store_level = current_level + 1 if current_level < 10 else 10
-                                                    new_perks = generate_unique_perks(perk_store_level, 3, 0)
-                                                    c2.execute('''INSERT OR REPLACE INTO pending_perks (guild_id, user_id, level, perks_json)
-                                                                  VALUES (?, ?, ?, ?)''',
-                                                               (_guild_id, _user_id, perk_store_level, json.dumps({'selected_perks': new_perks})))
-                                                    conn2.commit()
-                                                finally:
-                                                    conn2.close()
-                                                if current_level == 10:
-                                                    from achievements import award_trophy
-                                                    await award_trophy(_bot, _guild_id, _user_id, 'nest_master')
-                                                await check_and_award_achievements(_guild_id, _user_id, bot=_bot)
-                                                self.stop()
-                                                if current_level < 10:
-                                                    await btn_inter.followup.send(
-                                                        f"✨ **Level {_new_level} Unlocked!**\n🎁 A new perk is waiting! Use `/dragonnest` to claim it.",
-                                                        ephemeral=False
-                                                    )
-                                                else:
-                                                    await btn_inter.followup.send(
-                                                        f"🏆 **Max Level Reached!**\nYou've reached the maximum Dragon Nest level!\n🎁 Your final perk is waiting! Use `/dragonnest` to claim it.",
-                                                        ephemeral=False
-                                                    )
-
-                                        await message.channel.send(embed=embed, view=_NestSacrificeView())
-                                    else:
-                                        # Max level
-                                        c.execute('UPDATE dragon_nest SET bounties_active = NULL, speedrun_catches = 0 WHERE guild_id = ? AND user_id = ?',
-                                                  (guild_id, message.author.id))
-                                        c.execute('DELETE FROM dragon_nest_active WHERE guild_id = ? AND user_id = ?',
-                                                  (guild_id, message.author.id))
-                                        conn.commit()
-
-                                        try:
-                                            await message.channel.send(f"🎉 {message.author.mention} **Dragon Nest Complete!**\nYou've completed all bounties at max level! Well done!")
-                                        except:
-                                            pass
-
+                        c.execute('SELECT dragon_type FROM server_discoveries WHERE guild_id = ? AND dragon_type = ?',
+                                  (guild_id, dragon_key))
+                        discovery = c.fetchone()
+                        if not discovery:
+                            c.execute('''INSERT INTO server_discoveries (guild_id, dragon_type, first_discovered_by, first_discovered_at, total_caught)
+                                         VALUES (?, ?, ?, ?, 1)''',
+                                      (guild_id, dragon_key, message.author.id, int(time.time())))
+                        else:
+                            c.execute('UPDATE server_discoveries SET total_caught = total_caught + 1 WHERE guild_id = ? AND dragon_type = ?',
+                                      (guild_id, dragon_key))
+    
+                        # Update catch time records
+                        c.execute('SELECT fastest_catch, slowest_catch FROM user_dragons WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
+                                  (guild_id, message.author.id, dragon_key))
+                        catch_record = c.fetchone()
+    
+                        if catch_record:
+                            fastest = catch_record[0] if catch_record[0] > 0 else catch_time
+                            slowest = catch_record[1] if catch_record[1] > 0 else catch_time
+    
+                            if catch_time < fastest:
+                                fastest = catch_time
+                            if catch_time > slowest:
+                                slowest = catch_time
+    
+                            c.execute('''UPDATE user_dragons SET fastest_catch = ?, slowest_catch = ?
+                                         WHERE guild_id = ? AND user_id = ? AND dragon_type = ?''',
+                                      (fastest, slowest, guild_id, message.author.id, dragon_key))
+                        else:
+                            c.execute('''INSERT INTO user_dragons (guild_id, user_id, dragon_type, count, fastest_catch, slowest_catch)
+                                         VALUES (?, ?, ?, 0, ?, ?)''',
+                                      (guild_id, message.author.id, dragon_key, catch_time, catch_time))
+    
                         conn.commit()
                         conn.close()
-
-                        # Trophy checks after catch
-                        _dragon_data = DRAGON_TYPES.get(spawn_data['dragon_type'], {})
-                        _rarity = _dragon_data.get('rarity', '')
-
-                        if _rarity in ('mythic', 'ultra'):
-                            await award_trophy(self.bot, guild_id, message.author.id, 'mythic_hunter')
-
-                        _conn_s = get_db_connection()
-                        _c_s = _conn_s.cursor()
-                        _c_s.execute('SELECT COUNT(*) FROM user_dragons WHERE guild_id = ? AND user_id = ? AND count > 0',
-                                     (guild_id, message.author.id))
-                        _unique = _c_s.fetchone()[0]
-                        _conn_s.close()
-                        if _unique >= len(DRAGON_TYPES):
-                            await award_trophy(self.bot, guild_id, message.author.id, 'dragon_scholar')
-
-                        # Auto-bingo completion notification
-                        if bingo_just_completed:
+    
+                        # Apply perks
+                        base_amount = 1
+                        final_amount, pack_rewards, time_bonus, perks_applied = apply_perks(guild_id, message.author.id, base_amount, dragon_key)
+    
+                        # Apply items (Night Vision, Dragon Magnet)
+                        final_amount = apply_items(guild_id, message.author.id, final_amount)
+    
+                        # Apply Knowledge Book passive bonus (+2% catch per book)
+                        knowledge_bonus = get_passive_bonus(guild_id, message.author.id, 'catch')
+                        if knowledge_bonus > 0:
+                            final_amount = int(final_amount * (1 + knowledge_bonus))
+                            perks_applied.append(f"📚 Knowledge Book (+{int(knowledge_bonus*100)}% boost)")
+    
+                        # Apply Lucky Charm (2x catch rate)
+                        current_time = int(time.time())
+                        if guild_id in active_luckycharms and message.author.id in active_luckycharms[guild_id]:
+                            if active_luckycharms[guild_id][message.author.id] > current_time:
+                                final_amount *= 2
+                                perks_applied.append(f"🍀 Lucky Charm (doubled!)")
+    
+                        # Check for Alpha Dragon server-wide effects
+                        alpha_effect_triggered = False
+                        alpha_owner_name = None
+                        alpha_dragon_name = None
+                        alpha_multiplier = 1
+                        dragonscale_event_minutes = 0
+    
+                        conn = get_db_connection()
+                        c = conn.cursor()
+    
+                        c.execute('''SELECT u.user_id, u.name FROM user_alphas u
+                                     WHERE u.guild_id = ?''', (guild_id,))
+                        all_alphas = c.fetchall()
+    
+                        if all_alphas and random.random() < 0.05:
+                            alpha_owner_id, alpha_name = random.choice(all_alphas)
+                            alpha_owner = message.guild.get_member(alpha_owner_id)
+    
+                            if random.random() < 0.95:
+                                rng = random.random()
+                                if rng < 0.75:
+                                    alpha_multiplier = 2
+                                else:
+                                    alpha_multiplier = 3
+                                final_amount *= alpha_multiplier
+                                alpha_effect_triggered = True
+                                alpha_owner_name = alpha_owner.display_name if alpha_owner else "Unknown"
+                                alpha_dragon_name = alpha_name
+                            else:
+                                dragonscale_event_minutes = 0.5
+                                dragonscale_event_seconds = 30
+    
+                                if guild_id not in active_dragonscales or active_dragonscales[guild_id] <= current_time:
+                                    active_dragonscales[guild_id] = current_time + dragonscale_event_seconds
+                                    dragonscale_event_starts[guild_id] = current_time
+                                else:
+                                    active_dragonscales[guild_id] += dragonscale_event_seconds
+    
+                                conn.commit()
+                                alpha_effect_triggered = True
+                                alpha_owner_name = alpha_owner.display_name if alpha_owner else "Unknown"
+                                alpha_dragon_name = alpha_name
+    
+                        # Add dragons and coins to user
+                        if final_amount > 0:
+                            await add_dragons(guild_id, message.author.id, dragon_key, final_amount)
+                            bingo_just_completed = update_bingo_on_catch(guild_id, message.author.id, dragon_key)
+                            base_coins = max(2, int(dragon_data['value'] * final_amount))
+                            coins_earned = base_coins
+    
+                            c.execute('SELECT COUNT(*) FROM user_alphas WHERE guild_id = ?', (guild_id,))
+                            server_alpha_count = c.fetchone()[0]
+    
+                            c.execute('SELECT COUNT(*) FROM user_alphas WHERE guild_id = ? AND user_id = ?', (guild_id, message.author.id))
+                            user_alpha_count = c.fetchone()[0]
+    
+                            server_coin_bonus = server_alpha_count * 0.08
+                            user_coin_bonus = user_alpha_count * 0.15
+                            total_coin_multiplier = 1 + server_coin_bonus + user_coin_bonus
+                            coins_earned = int(coins_earned * total_coin_multiplier)
+                            alpha_coin_bonus = coins_earned - base_coins
+    
+                            # Gold Rush: +50% coin bonus if active
+                            from utils import get_active_item as _get_active_item
+                            if _get_active_item(guild_id, message.author.id, 'gold_rush'):
+                                coins_earned = int(coins_earned * 1.5)
+    
+                            await update_balance_and_check_trophies(self.bot, guild_id, message.author.id, coins_earned)
+    
+                            # Track dragonfest catches if active
+                            dragonfest_data = active_dragonfest.get(guild_id)
+                            if dragonfest_data and (isinstance(dragonfest_data, dict) and dragonfest_data['end'] > current_time or isinstance(dragonfest_data, int) and dragonfest_data > current_time):
+                                dragonfest_data = active_dragonfest.get(guild_id)
+                                if isinstance(dragonfest_data, dict):
+                                    event_start = dragonfest_data['start']
+                                else:
+                                    event_start = current_time
+    
+                                try:
+                                    conn_df = get_db_connection()
+                                    c_df = conn_df.cursor()
+    
+                                    c_df.execute('''INSERT INTO dragonfest_event_log
+                                                   (guild_id, user_id, event_start, dragon_type, amount, caught_at)
+                                                   VALUES (?, ?, ?, ?, ?, ?)''',
+                                                (guild_id, message.author.id, event_start, dragon_key, final_amount, int(time.time())))
+    
+                                    c_df.close()
+                                    conn_df.close()
+    
+                                    logger.info(f"[DRAGONFEST] Logged {dragon_key}x{final_amount}")
+                                except Exception as e:
+                                    logger.error(f"[DRAGONFEST] LOG ERROR: {e}")
+    
+                            # Track dragonscale catches if active
+                            if guild_id in active_dragonscales and active_dragonscales[guild_id] > current_time:
+                                event_start = dragonscale_event_starts.get(guild_id, current_time)
+    
+                                try:
+                                    conn_ds = get_db_connection()
+                                    c_ds = conn_ds.cursor()
+    
+                                    c_ds.execute('''INSERT INTO dragonscale_event_log
+                                                   (guild_id, user_id, event_start, dragon_type, amount, caught_at)
+                                                   VALUES (?, ?, ?, ?, ?, ?)''',
+                                                (guild_id, message.author.id, event_start, dragon_key, final_amount, int(time.time())))
+    
+                                    c_ds.close()
+                                    conn_ds.close()
+    
+                                    logger.info(f"[DRAGONSCALE] Logged {dragon_key}x{final_amount}")
+                                except Exception as e:
+                                    logger.error(f"[DRAGONSCALE] LOG ERROR: {e}")
+                            else:
+                                if guild_id in active_dragonscales:
+                                    logger.info(f"[DRAGONSCALE] Event ended or not active")
+    
+                            # Check Dragonpass quests
+                            dragon_rarity_index = list(DRAGON_TYPES.keys()).index(dragon_key)
+                            is_rare = dragon_rarity_index >= 6
+    
+                            conn_dp = get_db_connection()
+                            c_dp = conn_dp.cursor()
+                            c_dp.execute('SELECT level FROM dragonpass WHERE guild_id = ? AND user_id = ?', (guild_id, message.author.id))
+                            dp_result = c_dp.fetchone()
+                            current_dp_level = dp_result[0] if dp_result else 0
+                            conn_dp.close()
+    
+                            result = await asyncio.to_thread(check_dragonpass_quests, guild_id, message.author.id, 'catch_dragon', final_amount, dragon_key, catch_time)
+                            _r2 = await asyncio.to_thread(check_dragonpass_quests, guild_id, message.author.id, 'earn_coins', int(coins_earned))
+                            _pending_quest_notifications = []
+                            if result:
+                                coins, level_delta, trophies, quest_info = result
+                                for _tid in trophies:
+                                    await award_trophy(self.bot, guild_id, message.author.id, _tid)
+                                if quest_info:
+                                    _pending_quest_notifications.append(quest_info)
+                            if _r2 and _r2[3]:
+                                _pending_quest_notifications.append(_r2[3])
+    
+                            if result and result[1] > 0:
+                                level_up_count = result[1]
+                                new_level = current_dp_level + level_up_count
+    
+                                if new_level <= 10:
+                                    pack_type = 'stone' if new_level % 2 == 0 else 'wooden'
+                                elif new_level <= 20:
+                                    pack_type = 'silver' if new_level % 2 == 0 else 'bronze'
+                                else:
+                                    pack_type = 'diamond' if new_level % 2 == 0 else 'gold'
+    
+                                pack_data = PACK_TYPES.get(pack_type, {})
+    
+                                levelup_embed = discord.Embed(
+                                    title="🎉 Dragonpass Level Up!",
+                                    description=f"{message.author.mention} has reached **Level {new_level}** in the Dragonpass!",
+                                    color=0xFFD700
+                                )
+    
+                                levelup_embed.add_field(
+                                    name="🎁 Reward Earned",
+                                    value=f"**{pack_data.get('name', pack_type.capitalize())} Pack**\n{pack_data.get('emoji', '📦')}",
+                                    inline=True
+                                )
+    
+                                levelup_embed.add_field(
+                                    name="⭐ Progress",
+                                    value=f"Level {new_level}/30",
+                                    inline=True
+                                )
+    
+                                await message.channel.send(embed=levelup_embed)
+    
+                            # Check and update Dragon Nest bounties
+                            conn = get_db_connection()
+                            c = conn.cursor()
+    
+                            c.execute('SELECT expires_at FROM raid_bosses WHERE guild_id = ? AND expires_at > ?',
+                                      (guild_id, int(time.time())))
+                            raid_active = c.fetchone()
+    
+                            c.execute('SELECT active_until FROM dragon_nest_active WHERE guild_id = ? AND user_id = ?',
+                                      (guild_id, message.author.id))
+                            active_result = c.fetchone()
+    
+                            if active_result and active_result[0] > int(time.time()) and not raid_active:
+                                c.execute('SELECT bounties_active, speedrun_catches, level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
+                                          (guild_id, message.author.id))
+                                nest_result = c.fetchone()
+    
+                                if nest_result and nest_result[0]:
+                                    import ast
+                                    bounties = ast.literal_eval(nest_result[0])
+                                    speedrun_catches = nest_result[1]
+                                    nest_level = nest_result[2]
+    
+                                    bounties_completed = 0
+                                    _rarity_order = {'common': 0, 'uncommon': 1, 'rare': 2, 'epic': 3, 'legendary': 4, 'mythic': 5, 'ultra': 6}
+                                    dragon_rarity_level = 0
+                                    for _rarity, _dragons in DRAGON_RARITY_TIERS.items():
+                                        if dragon_key in _dragons:
+                                            dragon_rarity_level = _rarity_order.get(_rarity, 0)
+                                            break
+    
+                                    for bounty in bounties:
+                                        if bounty['type'] == 'catch_any':
+                                            bounty['progress'] = min(bounty['progress'] + final_amount, bounty['target'])
+                                        elif bounty['type'] == 'catch_rarity_or_higher' and bounty.get('rarity_level') and dragon_rarity_level >= bounty['rarity_level']:
+                                            bounty['progress'] = min(bounty['progress'] + final_amount, bounty['target'])
+    
+                                        if bounty['progress'] >= bounty['target']:
+                                            bounties_completed += 1
+    
+                                    new_speedrun = speedrun_catches + final_amount
+    
+                                    c.execute('UPDATE dragon_nest SET bounties_active = ?, speedrun_catches = ? WHERE guild_id = ? AND user_id = ?',
+                                              (str(bounties), new_speedrun, guild_id, message.author.id))
+    
+                                    total_bounties = len(bounties)
+                                    if bounties_completed >= total_bounties:
+                                        c.execute('UPDATE dragon_nest SET bounties_completed = bounties_completed + 1 WHERE guild_id = ? AND user_id = ?',
+                                                  (guild_id, message.author.id))
+    
+                                        if nest_level < 10:
+                                            new_level = nest_level + 1
+    
+                                            c.execute('SELECT SUM(count) FROM user_dragons WHERE guild_id = ? AND user_id = ?',
+                                                     (guild_id, message.author.id))
+                                            total_dragons_result = c.fetchone()
+                                            total_dragons = total_dragons_result[0] if total_dragons_result and total_dragons_result[0] else 0
+    
+                                            if new_level <= 3:
+                                                sacrifice_percentage = 0.10
+                                            elif new_level <= 6:
+                                                sacrifice_percentage = 0.15
+                                            else:
+                                                sacrifice_percentage = 0.20
+    
+                                            dragons_to_sacrifice = max(1, int(total_dragons * sacrifice_percentage))
+    
+                                            c.execute('SELECT dragon_type, count FROM user_dragons WHERE guild_id = ? AND user_id = ? AND count > 0',
+                                                     (guild_id, message.author.id))
+                                            user_dragons_list = c.fetchall()
+    
+                                            sacrifice_list = {}
+                                            dragons_needed = dragons_to_sacrifice
+    
+                                            import random as py_random
+                                            user_dragons_list_shuffled = list(user_dragons_list)
+                                            py_random.shuffle(user_dragons_list_shuffled)
+    
+                                            for dragon_type, available_count in user_dragons_list_shuffled:
+                                                if dragons_needed <= 0:
+                                                    break
+                                                take_count = min(available_count, dragons_needed)
+                                                sacrifice_list[dragon_type] = take_count
+                                                dragons_needed -= take_count
+    
+                                            sacrifice_display = ""
+                                            for dragon_type, count in sacrifice_list.items():
+                                                dragon_data_s = DRAGON_TYPES[dragon_type]
+                                                sacrifice_display += f"{dragon_data_s['emoji']} **{count}x {dragon_data_s['name']}**\n"
+    
+                                            c.execute('''INSERT OR REPLACE INTO pending_perks (guild_id, user_id, level, perks_json)
+                                                         VALUES (?, ?, ?, ?)''',
+                                                      (guild_id, message.author.id, new_level, json.dumps({
+                                                          'sacrifice_list': sacrifice_list,
+                                                          'new_level': new_level
+                                                      })))
+    
+                                            c.execute('UPDATE dragon_nest SET bounties_active = NULL, speedrun_catches = 0 WHERE guild_id = ? AND user_id = ?',
+                                                      (guild_id, message.author.id))
+    
+                                            c.execute('DELETE FROM dragon_nest_active WHERE guild_id = ? AND user_id = ?',
+                                                      (guild_id, message.author.id))
+    
+                                            conn.commit()
+    
+                                            embed = discord.Embed(
+                                                title="🎉 Dragon Nest Level Complete!",
+                                                description=f"You completed all bounties and reached **Level {new_level}: {LEVEL_NAMES.get(new_level, 'Unknown')}**!\n\n"
+                                                            f"🐉 **Dragons to Sacrifice:**\n{sacrifice_display}\n"
+                                                            f"Click **Submit Dragons** to confirm and unlock your perk reward!",
+                                                color=discord.Color.green()
+                                            )
+    
+                                            _guild_id = guild_id
+                                            _user_id = message.author.id
+                                            _sacrifice_list = sacrifice_list
+                                            _new_level = new_level
+                                            _bot = self.bot
+    
+                                            class _NestSacrificeView(discord.ui.View):
+                                                def __init__(self):
+                                                    super().__init__(timeout=300)
+                                                    btn = discord.ui.Button(label="💾 Submit Dragons", style=discord.ButtonStyle.success)
+                                                    btn.callback = self.submit_dragons
+                                                    self.add_item(btn)
+    
+                                                async def submit_dragons(self, btn_inter: discord.Interaction):
+                                                    if btn_inter.user.id != _user_id:
+                                                        await btn_inter.response.send_message("This is not your action!", ephemeral=True)
+                                                        return
+                                                    await btn_inter.response.defer()
+                                                    from config import generate_unique_perks
+                                                    conn2 = get_db_connection()
+                                                    try:
+                                                        c2 = conn2.cursor()
+                                                        for dt, cnt in _sacrifice_list.items():
+                                                            c2.execute('UPDATE user_dragons SET count = count - ? WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
+                                                                       (cnt, _guild_id, _user_id, dt))
+                                                        c2.execute('UPDATE dragon_nest SET level = ? WHERE guild_id = ? AND user_id = ?',
+                                                                   (_new_level, _guild_id, _user_id))
+                                                        c2.execute('DELETE FROM pending_perks WHERE guild_id = ? AND user_id = ?',
+                                                                   (_guild_id, _user_id))
+                                                        c2.execute('SELECT level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
+                                                                   (_guild_id, _user_id))
+                                                        _row = c2.fetchone()
+                                                        current_level = _row[0] if _row else 0
+                                                        perk_store_level = current_level + 1 if current_level < 10 else 10
+                                                        new_perks = generate_unique_perks(perk_store_level, 3, 0)
+                                                        c2.execute('''INSERT OR REPLACE INTO pending_perks (guild_id, user_id, level, perks_json)
+                                                                      VALUES (?, ?, ?, ?)''',
+                                                                   (_guild_id, _user_id, perk_store_level, json.dumps({'selected_perks': new_perks})))
+                                                        conn2.commit()
+                                                    finally:
+                                                        conn2.close()
+                                                    if current_level == 10:
+                                                        from achievements import award_trophy
+                                                        await award_trophy(_bot, _guild_id, _user_id, 'nest_master')
+                                                    await check_and_award_achievements(_guild_id, _user_id, bot=_bot)
+                                                    self.stop()
+                                                    if current_level < 10:
+                                                        await btn_inter.followup.send(
+                                                            f"✨ **Level {_new_level} Unlocked!**\n🎁 A new perk is waiting! Use `/dragonnest` to claim it.",
+                                                            ephemeral=False
+                                                        )
+                                                    else:
+                                                        await btn_inter.followup.send(
+                                                            f"🏆 **Max Level Reached!**\nYou've reached the maximum Dragon Nest level!\n🎁 Your final perk is waiting! Use `/dragonnest` to claim it.",
+                                                            ephemeral=False
+                                                        )
+    
+                                            await message.channel.send(embed=embed, view=_NestSacrificeView())
+                                        else:
+                                            # Max level
+                                            c.execute('UPDATE dragon_nest SET bounties_active = NULL, speedrun_catches = 0 WHERE guild_id = ? AND user_id = ?',
+                                                      (guild_id, message.author.id))
+                                            c.execute('DELETE FROM dragon_nest_active WHERE guild_id = ? AND user_id = ?',
+                                                      (guild_id, message.author.id))
+                                            conn.commit()
+    
+                                            try:
+                                                await message.channel.send(f"🎉 {message.author.mention} **Dragon Nest Complete!**\nYou've completed all bounties at max level! Well done!")
+                                            except:
+                                                pass
+    
+                            conn.commit()
+                            conn.close()
+    
+                            # Trophy checks after catch
+                            _dragon_data = DRAGON_TYPES.get(spawn_data['dragon_type'], {})
+                            _rarity = _dragon_data.get('rarity', '')
+    
+                            if _rarity in ('mythic', 'ultra'):
+                                await award_trophy(self.bot, guild_id, message.author.id, 'mythic_hunter')
+    
+                            _conn_s = get_db_connection()
+                            _c_s = _conn_s.cursor()
+                            _c_s.execute('SELECT COUNT(*) FROM user_dragons WHERE guild_id = ? AND user_id = ? AND count > 0',
+                                         (guild_id, message.author.id))
+                            _unique = _c_s.fetchone()[0]
+                            _conn_s.close()
+                            if _unique >= len(DRAGON_TYPES):
+                                await award_trophy(self.bot, guild_id, message.author.id, 'dragon_scholar')
+    
+                            # Auto-bingo completion notification
+                            if bingo_just_completed:
+                                try:
+                                    await update_balance_and_check_trophies(self.bot, guild_id, message.author.id, 500)
+                                    _bq = await asyncio.to_thread(check_dragonpass_quests, guild_id, message.author.id, 'complete_bingo', 1)
+                                    if _bq and _bq[3]:
+                                        await send_quest_notification(self.bot, guild_id, message.author.id, _bq[3])
+                                    bingo_embed = discord.Embed(
+                                        title="🎉 BINGO!",
+                                        description=f"**{message.author.mention} completed a bingo line!**\n🏆 Reward: **500** 🪙",
+                                        color=discord.Color.gold()
+                                    )
+                                    await message.channel.send(content=message.author.mention, embed=bingo_embed)
+                                except Exception as e:
+                                    logger.error(f"Bingo completion handling failed: {e}")
+    
+                        # Add packs if any
+                        if pack_rewards:
+                            conn = get_db_connection()
+                            c = conn.cursor()
+                            for pack_tier in pack_rewards:
+                                c.execute('''INSERT INTO user_packs (guild_id, user_id, pack_type, count)
+                                             VALUES (?, ?, ?, 1)
+                                             ON CONFLICT(guild_id, user_id, pack_type)
+                                             DO UPDATE SET count = count + 1''',
+                                          (guild_id, message.author.id, pack_tier))
+                            conn.commit()
+                            conn.close()
+    
+                        # Extend dragonscale time if applicable
+                        if time_bonus > 0 and guild_id in active_dragonscales:
+                            if active_dragonscales[guild_id] > int(time.time()):
+                                active_dragonscales[guild_id] += time_bonus * 60
+    
+                        # Send success message
+                        catch_secs = round(catch_time, 1)
+    
+                        embed = discord.Embed(
+                            title=f"🎉 {message.author.display_name} caught the dragon!",
+                            description=f"{final_amount}x {dragon_data['emoji']} **{dragon_data['name']} Dragon**",
+                            color=discord.Color.gold()
+                        )
+    
+                        # Catch time + coins as inline fields
+                        embed.add_field(name="⏱️ Catch Time", value=f"{catch_secs}s", inline=True)
+    
+                        if final_amount > 0:
+                            coins_value = f"{int(coins_earned)}"
+                            if alpha_coin_bonus > 0:
+                                coins_value += f"\n*(+{alpha_coin_bonus} from Alpha)*"
+                            embed.add_field(name="🪙 Earned", value=coins_value, inline=True)
+                        else:
+                            embed.add_field(name="💀 Result", value="Lost all dragons!", inline=True)
+    
+                        # Bonus packs
+                        if pack_rewards:
+                            packs_text = ", ".join([PACK_TYPES[p]['emoji'] + " " + PACK_TYPES[p]['name'] for p in pack_rewards])
+                            embed.add_field(name="📦 Bonus Packs", value=packs_text, inline=False)
+    
+                        # Dragonscale time bonus
+                        if time_bonus > 0:
+                            embed.add_field(name="<:dragonscale:1446278170998341693> Dragonscale", value=f"+{time_bonus} minutes", inline=True)
+    
+                        # Active perks (only if any)
+                        if perks_applied:
+                            embed.add_field(name="✨ Active Perks", value=" • ".join(perks_applied), inline=False)
+    
+                        # Alpha dragon influence
+                        if alpha_effect_triggered:
+                            if alpha_multiplier > 1:
+                                embed.add_field(
+                                    name="🌟 Alpha Influence",
+                                    value=f"{alpha_owner_name}'s **{alpha_dragon_name}** blessed this catch! (x{alpha_multiplier})",
+                                    inline=False
+                                )
+                            elif dragonscale_event_minutes > 0:
+                                online_count = sum(1 for m in message.guild.members if not m.bot and m.status != discord.Status.offline)
+                                embed.add_field(
+                                    name="<:dragonscale:1446278170998341693> Dragonscale Event",
+                                    value=f"{alpha_owner_name}'s **{alpha_dragon_name}** triggered an event!\n+30 seconds for {online_count} online members",
+                                    inline=False
+                                )
+    
+                        # Night vision
+                        if guild_id in active_spawns and active_spawns[guild_id].get('night_vision_activator'):
+                            embed.add_field(name="🌙 Night Vision", value="Higher rarity dragon found!", inline=False)
+                        elif item_boost_message and "inactive" not in item_boost_message:
+                            embed.add_field(name="🌙 Night Vision", value="Higher rarity dragon found!", inline=False)
+    
+                        await message.channel.send(embed=embed)
+                        _catch_embed_sent = True
+    
+                        # Send quest notifications after catch embed
+                        for _qinfo in _pending_quest_notifications:
+                            await send_quest_notification(self.bot, guild_id, message.author.id, _qinfo)
+    
+                        # Instant respawn if dragonscale/dragonfest/premium is active
+                        current_time = int(time.time())
+                        has_active_dragonscale = guild_id in active_dragonscales and active_dragonscales[guild_id] > current_time
+    
+                        has_dragonfest = False
+                        if guild_id in active_dragonfest:
+                            dragonfest_data = active_dragonfest[guild_id]
+                            dragonfest_end_time = dragonfest_data['end'] if isinstance(dragonfest_data, dict) else dragonfest_data
+                            has_dragonfest = dragonfest_end_time > current_time
+    
+                        has_premium = guild_id in premium_users and any(end_time > current_time for end_time in premium_users[guild_id].values())
+    
+                        if has_active_dragonscale or has_dragonfest or has_premium:
+                            await spawn_dragon(guild_id, message.channel, self.bot)
+    
                             try:
-                                await update_balance_and_check_trophies(self.bot, guild_id, message.author.id, 500)
-                                _bq = await asyncio.to_thread(check_dragonpass_quests, guild_id, message.author.id, 'complete_bingo', 1)
-                                if _bq and _bq[3]:
-                                    await send_quest_notification(self.bot, guild_id, message.author.id, _bq[3])
-                                bingo_embed = discord.Embed(
-                                    title="🎉 BINGO!",
-                                    description=f"**{message.author.mention} completed a bingo line!**\n🏆 Reward: **500** 🪙",
+                                conn_update = get_db_connection()
+                                c_update = conn_update.cursor()
+                                c_update.execute('UPDATE spawn_config SET last_spawn_time = ? WHERE guild_id = ?',
+                                              (int(time.time()), guild_id))
+                                conn_update.commit()
+                                conn_update.close()
+                            except:
+                                pass
+    
+                    except Exception as _catch_err:
+                        logger.error(f"[catch] reward processing error: {_catch_err}", exc_info=True)
+                        if not _catch_embed_sent:
+                            try:
+                                fallback = discord.Embed(
+                                    title=f"🎉 {message.author.display_name} caught the dragon!",
+                                    description=f"{dragon_data['emoji']} **{dragon_data['name']} Dragon** caught!",
                                     color=discord.Color.gold()
                                 )
-                                await message.channel.send(content=message.author.mention, embed=bingo_embed)
-                            except Exception as e:
-                                logger.error(f"Bingo completion handling failed: {e}")
-
-                    # Add packs if any
-                    if pack_rewards:
-                        conn = get_db_connection()
-                        c = conn.cursor()
-                        for pack_tier in pack_rewards:
-                            c.execute('''INSERT INTO user_packs (guild_id, user_id, pack_type, count)
-                                         VALUES (?, ?, ?, 1)
-                                         ON CONFLICT(guild_id, user_id, pack_type)
-                                         DO UPDATE SET count = count + 1''',
-                                      (guild_id, message.author.id, pack_tier))
-                        conn.commit()
-                        conn.close()
-
-                    # Extend dragonscale time if applicable
-                    if time_bonus > 0 and guild_id in active_dragonscales:
-                        if active_dragonscales[guild_id] > int(time.time()):
-                            active_dragonscales[guild_id] += time_bonus * 60
-
-                    # Send success message
-                    catch_secs = round(catch_time, 1)
-
-                    embed = discord.Embed(
-                        title=f"🎉 {message.author.display_name} caught the dragon!",
-                        description=f"{final_amount}x {dragon_data['emoji']} **{dragon_data['name']} Dragon**",
-                        color=discord.Color.gold()
-                    )
-
-                    # Catch time + coins as inline fields
-                    embed.add_field(name="⏱️ Catch Time", value=f"{catch_secs}s", inline=True)
-
-                    if final_amount > 0:
-                        coins_value = f"{int(coins_earned)}"
-                        if alpha_coin_bonus > 0:
-                            coins_value += f"\n*(+{alpha_coin_bonus} from Alpha)*"
-                        embed.add_field(name="🪙 Earned", value=coins_value, inline=True)
-                    else:
-                        embed.add_field(name="💀 Result", value="Lost all dragons!", inline=True)
-
-                    # Bonus packs
-                    if pack_rewards:
-                        packs_text = ", ".join([PACK_TYPES[p]['emoji'] + " " + PACK_TYPES[p]['name'] for p in pack_rewards])
-                        embed.add_field(name="📦 Bonus Packs", value=packs_text, inline=False)
-
-                    # Dragonscale time bonus
-                    if time_bonus > 0:
-                        embed.add_field(name="<:dragonscale:1446278170998341693> Dragonscale", value=f"+{time_bonus} minutes", inline=True)
-
-                    # Active perks (only if any)
-                    if perks_applied:
-                        embed.add_field(name="✨ Active Perks", value=" • ".join(perks_applied), inline=False)
-
-                    # Alpha dragon influence
-                    if alpha_effect_triggered:
-                        if alpha_multiplier > 1:
-                            embed.add_field(
-                                name="🌟 Alpha Influence",
-                                value=f"{alpha_owner_name}'s **{alpha_dragon_name}** blessed this catch! (x{alpha_multiplier})",
-                                inline=False
-                            )
-                        elif dragonscale_event_minutes > 0:
-                            online_count = sum(1 for m in message.guild.members if not m.bot and m.status != discord.Status.offline)
-                            embed.add_field(
-                                name="<:dragonscale:1446278170998341693> Dragonscale Event",
-                                value=f"{alpha_owner_name}'s **{alpha_dragon_name}** triggered an event!\n+30 seconds for {online_count} online members",
-                                inline=False
-                            )
-
-                    # Night vision
-                    if guild_id in active_spawns and active_spawns[guild_id].get('night_vision_activator'):
-                        embed.add_field(name="🌙 Night Vision", value="Higher rarity dragon found!", inline=False)
-                    elif item_boost_message and "inactive" not in item_boost_message:
-                        embed.add_field(name="🌙 Night Vision", value="Higher rarity dragon found!", inline=False)
-
-                    await message.channel.send(embed=embed)
-
-                    # Send quest notifications after catch embed
-                    for _qinfo in _pending_quest_notifications:
-                        await send_quest_notification(self.bot, guild_id, message.author.id, _qinfo)
-
-                    # Instant respawn if dragonscale/dragonfest/premium is active
-                    current_time = int(time.time())
-                    has_active_dragonscale = guild_id in active_dragonscales and active_dragonscales[guild_id] > current_time
-
-                    has_dragonfest = False
-                    if guild_id in active_dragonfest:
-                        dragonfest_data = active_dragonfest[guild_id]
-                        dragonfest_end_time = dragonfest_data['end'] if isinstance(dragonfest_data, dict) else dragonfest_data
-                        has_dragonfest = dragonfest_end_time > current_time
-
-                    has_premium = guild_id in premium_users and any(end_time > current_time for end_time in premium_users[guild_id].values())
-
-                    if has_active_dragonscale or has_dragonfest or has_premium:
-                        await spawn_dragon(guild_id, message.channel, self.bot)
-
-                        try:
-                            conn_update = get_db_connection()
-                            c_update = conn_update.cursor()
-                            c_update.execute('UPDATE spawn_config SET last_spawn_time = ? WHERE guild_id = ?',
-                                          (int(time.time()), guild_id))
-                            conn_update.commit()
-                            conn_update.close()
-                        except:
-                            pass
+                                await message.channel.send(embed=fallback)
+                            except Exception:
+                                pass
 
         await self.bot.process_commands(message)
 
