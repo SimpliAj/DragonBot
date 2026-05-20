@@ -118,6 +118,8 @@ async def spawn_dragon(guild_id: int, channel, bot=None, catcher_id: int = None)
             'INSERT OR REPLACE INTO active_dragon_spawns (guild_id, dragon_type, channel_id, message_id, spawn_timestamp, night_vision_activator) VALUES (?, ?, ?, ?, ?, ?)',
             (guild_id, dragon_key, channel.id, msg.id, spawn_ts, nv_activator)
         )
+        _c.execute('CREATE TABLE IF NOT EXISTS dragon_spawn_log (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, dragon_type TEXT, spawned_at INTEGER)')
+        _c.execute('INSERT INTO dragon_spawn_log (guild_id, dragon_type, spawned_at) VALUES (?, ?, ?)', (guild_id, dragon_key, spawn_ts))
         _conn.commit()
         _conn.close()
     except Exception as _e:
@@ -1265,6 +1267,9 @@ class EventsCog(commands.Cog):
                         c_catch.execute('UPDATE spawn_config SET last_spawn_time = ? WHERE guild_id = ?',
                                       (int(time.time()), guild_id))
                         c_catch.execute('DELETE FROM active_dragon_spawns WHERE guild_id = ?', (guild_id,))
+                        c_catch.execute('CREATE TABLE IF NOT EXISTS dragon_catch_log (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, user_id INTEGER, dragon_type TEXT, caught_at INTEGER)')
+                        c_catch.execute('INSERT INTO dragon_catch_log (guild_id, user_id, dragon_type, caught_at) VALUES (?, ?, ?, ?)',
+                                      (guild_id, message.author.id, dragon_key, int(time.time())))
                         conn_catch.commit()
                         conn_catch.close()
                     except:
