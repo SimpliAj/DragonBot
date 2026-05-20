@@ -29,6 +29,7 @@ def get_db_connection(timeout: float = DB_TIMEOUT_SHORT):
     """Get a database connection with WAL mode and busy timeout."""
     conn = sqlite3.connect(DB_PATH, timeout=timeout, check_same_thread=False)
     conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute('PRAGMA synchronous=NORMAL')
     conn.execute(f'PRAGMA busy_timeout={DB_BUSY_TIMEOUT}')
     return conn
 
