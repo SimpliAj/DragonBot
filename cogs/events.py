@@ -849,6 +849,10 @@ class EventsCog(commands.Cog):
 
                 c.execute('SELECT guild_id, spawn_channel_id FROM spawn_config')
                 spawn_channels_list = c.fetchall()
+
+                # Get active spawn message IDs to preserve them
+                c.execute('SELECT message_id FROM active_dragon_spawns')
+                active_spawn_msg_ids = {row[0] for row in c.fetchall()}
                 conn.close()
 
                 deleted_count = 0
@@ -865,6 +869,10 @@ class EventsCog(commands.Cog):
                         current_time = int(time.time())
 
                         for message in messages_to_check:
+                            # Never delete active dragon spawn messages
+                            if message.id in active_spawn_msg_ids:
+                                continue
+
                             message_age = current_time - int(message.created_at.timestamp())
 
                             if message_age < 1:
@@ -929,6 +937,19 @@ class EventsCog(commands.Cog):
                     'manual_spawn': False
                 }
                 logger.info(f"Recovered Raid Boss for guild {guild_id}, despawning in ~{(expires_at - current_time) // 60} minutes")
+
+            # Recover active dragon spawns so they can still be caught after restart
+            c.execute('SELECT guild_id, dragon_type, channel_id, message_id, spawn_timestamp, night_vision_activator FROM active_dragon_spawns')
+            for row in c.fetchall():
+                r_guild_id, dragon_type, channel_id, message_id, spawn_timestamp, nv_activator = row
+                active_spawns[r_guild_id] = {
+                    'dragon_type': dragon_type,
+                    'channel_id': channel_id,
+                    'message_id': message_id,
+                    'timestamp': spawn_timestamp,
+                    'night_vision_activator': nv_activator
+                }
+                logger.info(f"Recovered active dragon spawn for guild {r_guild_id}: {dragon_type}")
 
             conn.commit()
             conn.close()
