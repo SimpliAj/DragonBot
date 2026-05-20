@@ -1202,6 +1202,11 @@ class EventsCog(commands.Cog):
             if spawn_data['channel_id'] != message.channel.id:
                 return
 
+            # Bot protection: minimum 1.5s reaction time (self-bots respond in <100ms)
+            reaction_time = time.time() - spawn_data.get('timestamp', 0)
+            if reaction_time < 1.5:
+                return
+
             # Check if player is softlocked
             is_softlocked, upgrade_level = is_player_softlocked(guild_id, message.author.id)
             if is_softlocked:
