@@ -76,11 +76,20 @@ async def spawn_dragon(guild_id: int, channel, bot=None, catcher_id: int = None)
     base_coin_reward = max(2, int(dragon_data['value'] / 2))
 
     # Apply server-wide Alpha coin boost for display
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute('SELECT COUNT(*) FROM user_alphas WHERE guild_id = ?', (guild_id,))
-    server_alpha_count = c.fetchone()[0]
-    conn.close()
+    server_alpha_count = 0
+    for _attempt in range(5):
+        try:
+            conn = get_db_connection()
+            c = conn.cursor()
+            c.execute('SELECT COUNT(*) FROM user_alphas WHERE guild_id = ?', (guild_id,))
+            server_alpha_count = c.fetchone()[0]
+            conn.close()
+            break
+        except Exception as _e:
+            if _attempt < 4:
+                await asyncio.sleep(0.5 * (_attempt + 1))
+            else:
+                logger.warning(f"[spawn] alpha count failed after 5 retries: {_e}")
 
     displayed_coins = base_coin_reward
     if server_alpha_count > 0:
