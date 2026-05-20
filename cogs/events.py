@@ -21,7 +21,7 @@ from config import (
     ERROR_WEBHOOK_URL, LEVEL_NAMES, PACK_TYPES,
 )
 from achievements import award_trophy, check_and_award_achievements, send_quest_notification
-from database import get_user, get_user_async, init_db, is_player_softlocked, update_balance, update_balance_and_check_trophies
+from database import get_user, get_user_async, init_db, is_player_softlocked, update_balance, update_balance_and_check_trophies, get_db_connection
 from state import (
     active_dragonscales, active_dragonfest, active_luckycharms,
     active_spawns, active_usable_items, dragonscale_event_starts,
@@ -76,7 +76,7 @@ async def spawn_dragon(guild_id: int, channel, bot=None, catcher_id: int = None)
     base_coin_reward = max(2, int(dragon_data['value'] / 2))
 
     # Apply server-wide Alpha coin boost for display
-    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute('SELECT COUNT(*) FROM user_alphas WHERE guild_id = ?', (guild_id,))
     server_alpha_count = c.fetchone()[0]
@@ -112,7 +112,7 @@ async def spawn_dragon(guild_id: int, channel, bot=None, catcher_id: int = None)
     }
 
     try:
-        _conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        _conn = get_db_connection()
         _c = _conn.cursor()
         _c.execute(
             'INSERT OR REPLACE INTO active_dragon_spawns (guild_id, dragon_type, channel_id, message_id, spawn_timestamp, night_vision_activator) VALUES (?, ?, ?, ?, ?, ?)',
@@ -130,7 +130,7 @@ async def spawn_dragon(guild_id: int, channel, bot=None, catcher_id: int = None)
 async def update_raid_embed(guild_id, channel_id, bot, user_tier=None):
     """Update the main raid boss embed with current HP and participant counts for ALL tiers"""
     try:
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
         try:
             c.execute('SELECT easy_hp, easy_max_hp, normal_hp, normal_max_hp, hard_hp, hard_max_hp, boss_name, boss_rarity, reward_dragon, expires_at, message_id, easy_participants, normal_participants, hard_participants FROM raid_bosses WHERE guild_id = ?',
@@ -241,7 +241,7 @@ class RaidTierSelectView(discord.ui.View):
         await self._join_tier(btn_interaction, 'hard')
 
     async def _join_tier(self, btn_interaction: discord.Interaction, tier: str):
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         try:
             c = conn.cursor()
 
@@ -346,7 +346,7 @@ class RaidAttackView(discord.ui.View):
     async def attack_button(self, btn_interaction: discord.Interaction, button: discord.ui.Button):
         current_time = int(time.time())
 
-        conn_a = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn_a = get_db_connection()
         c_a = conn_a.cursor()
         try:
             c_a.execute('SELECT tier FROM raid_damage WHERE guild_id = ? AND user_id = ?',
@@ -845,7 +845,7 @@ class EventsCog(commands.Cog):
         async def cleanup_old_messages():
             """Delete old dragon spawns, black market, and other bot messages that won't work"""
             try:
-                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                conn = get_db_connection()
                 c = conn.cursor()
 
                 c.execute('SELECT guild_id, spawn_channel_id FROM spawn_config')
@@ -898,7 +898,7 @@ class EventsCog(commands.Cog):
 
         # Run database operations in thread to avoid blocking event loop
         def load_data():
-            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+            conn = get_db_connection()
             c = conn.cursor()
             c.execute('CREATE TABLE IF NOT EXISTS dragon_spawn_log (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, dragon_type TEXT, spawned_at INTEGER)')
             c.execute('CREATE TABLE IF NOT EXISTS dragon_catch_log (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id INTEGER, user_id INTEGER, dragon_type TEXT, caught_at INTEGER)')
@@ -1263,7 +1263,7 @@ class EventsCog(commands.Cog):
                     del active_spawns[guild_id]
 
                     try:
-                        conn_catch = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                        conn_catch = get_db_connection()
                         c_catch = conn_catch.cursor()
                         c_catch.execute('UPDATE spawn_config SET last_spawn_time = ? WHERE guild_id = ?',
                                       (int(time.time()), guild_id))
@@ -1301,7 +1301,7 @@ class EventsCog(commands.Cog):
                     catch_time = time.time() - spawn_data['timestamp']
 
                     # Record discovery if first time caught in server
-                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                    conn = get_db_connection()
                     c = conn.cursor()
                     c.execute('SELECT dragon_type FROM server_discoveries WHERE guild_id = ? AND dragon_type = ?',
                               (guild_id, dragon_key))
@@ -1366,7 +1366,7 @@ class EventsCog(commands.Cog):
                     alpha_multiplier = 1
                     dragonscale_event_minutes = 0
 
-                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                    conn = get_db_connection()
                     c = conn.cursor()
 
                     c.execute('''SELECT u.user_id, u.name FROM user_alphas u
@@ -1438,7 +1438,7 @@ class EventsCog(commands.Cog):
                                 event_start = current_time
 
                             try:
-                                conn_df = sqlite3.connect('dragon_bot.db', timeout=120.0, isolation_level=None)
+                                conn_df = get_db_connection()
                                 c_df = conn_df.cursor()
 
                                 c_df.execute('''INSERT INTO dragonfest_event_log
@@ -1458,7 +1458,7 @@ class EventsCog(commands.Cog):
                             event_start = dragonscale_event_starts.get(guild_id, current_time)
 
                             try:
-                                conn_ds = sqlite3.connect('dragon_bot.db', timeout=120.0, isolation_level=None)
+                                conn_ds = get_db_connection()
                                 c_ds = conn_ds.cursor()
 
                                 c_ds.execute('''INSERT INTO dragonscale_event_log
@@ -1480,7 +1480,7 @@ class EventsCog(commands.Cog):
                         dragon_rarity_index = list(DRAGON_TYPES.keys()).index(dragon_key)
                         is_rare = dragon_rarity_index >= 6
 
-                        conn_dp = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                        conn_dp = get_db_connection()
                         c_dp = conn_dp.cursor()
                         c_dp.execute('SELECT level FROM dragonpass WHERE guild_id = ? AND user_id = ?', (guild_id, message.author.id))
                         dp_result = c_dp.fetchone()
@@ -1533,7 +1533,7 @@ class EventsCog(commands.Cog):
                             await message.channel.send(embed=levelup_embed)
 
                         # Check and update Dragon Nest bounties
-                        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                        conn = get_db_connection()
                         c = conn.cursor()
 
                         c.execute('SELECT expires_at FROM raid_bosses WHERE guild_id = ? AND expires_at > ?',
@@ -1664,7 +1664,7 @@ class EventsCog(commands.Cog):
                                                     return
                                                 await btn_inter.response.defer()
                                                 from config import generate_unique_perks
-                                                conn2 = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                                conn2 = get_db_connection()
                                                 try:
                                                     c2 = conn2.cursor()
                                                     for dt, cnt in _sacrifice_list.items():
@@ -1726,7 +1726,7 @@ class EventsCog(commands.Cog):
                         if _rarity in ('mythic', 'ultra'):
                             await award_trophy(self.bot, guild_id, message.author.id, 'mythic_hunter')
 
-                        _conn_s = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                        _conn_s = get_db_connection()
                         _c_s = _conn_s.cursor()
                         _c_s.execute('SELECT COUNT(*) FROM user_dragons WHERE guild_id = ? AND user_id = ? AND count > 0',
                                      (guild_id, message.author.id))
@@ -1753,7 +1753,7 @@ class EventsCog(commands.Cog):
 
                     # Add packs if any
                     if pack_rewards:
-                        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                        conn = get_db_connection()
                         c = conn.cursor()
                         for pack_tier in pack_rewards:
                             c.execute('''INSERT INTO user_packs (guild_id, user_id, pack_type, count)
@@ -1846,7 +1846,7 @@ class EventsCog(commands.Cog):
                         await spawn_dragon(guild_id, message.channel, self.bot)
 
                         try:
-                            conn_update = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                            conn_update = get_db_connection()
                             c_update = conn_update.cursor()
                             c_update.execute('UPDATE spawn_config SET last_spawn_time = ? WHERE guild_id = ?',
                                           (int(time.time()), guild_id))

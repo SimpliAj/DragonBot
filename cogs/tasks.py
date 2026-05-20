@@ -188,7 +188,7 @@ class TasksCog(commands.Cog):
                         if last_spawn_hour == current_hour:
                             already_spawned_this_hour = True
 
-                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                    conn = get_db_connection()
                     c = conn.cursor()
 
                     # === SPAWN LOGIC ===
@@ -500,7 +500,7 @@ class TasksCog(commands.Cog):
                             pass
                     del active_spawns[guild_id]
                     try:
-                        _c = sqlite3.connect('dragon_bot.db', timeout=10)
+                        _c = get_db_connection()
                         _c.execute('DELETE FROM active_dragon_spawns WHERE guild_id = ?', (guild_id,))
                         _c.commit()
                         _c.close()
@@ -521,7 +521,7 @@ class TasksCog(commands.Cog):
             # Get last spawn time
             conn = None
             try:
-                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                conn = get_db_connection()
                 c = conn.cursor()
                 # Check spawn_config for last_spawn_time (backward compatibility)
                 c.execute('SELECT last_spawn_time FROM spawn_config WHERE guild_id = ?', (guild_id,))
@@ -611,7 +611,7 @@ class TasksCog(commands.Cog):
         """Check for expired Dragon Nest sessions and handle success/failure"""
         conn = None
         try:
-            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+            conn = get_db_connection()
             c = conn.cursor()
 
             current_time = int(time.time())
@@ -740,7 +740,7 @@ class TasksCog(commands.Cog):
             if not expired_guilds:
                 return
 
-            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+            conn = get_db_connection()
             c = conn.cursor()
 
             for guild_id, data in expired_guilds:
@@ -868,7 +868,7 @@ class TasksCog(commands.Cog):
             if not expired_guilds:
                 return
 
-            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+            conn = get_db_connection()
             c = conn.cursor()
 
             for guild_id in expired_guilds:
@@ -1262,7 +1262,7 @@ class TasksCog(commands.Cog):
                                         return
 
                                     # Process purchase
-                                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                    conn = get_db_connection()
                                     c = conn.cursor()
 
                                     # Deduct balance
@@ -1413,7 +1413,7 @@ class TasksCog(commands.Cog):
     @tasks.loop(minutes=1)
     async def process_breeding_queue(self):
         """Process queued breedings every minute - starts when cooldown is ready"""
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Get ALL pending breedings (not filtered by scheduled_for anymore)
@@ -1790,7 +1790,7 @@ class TasksCog(commands.Cog):
         current_time = int(time.time())
         dms_to_send = []  # Collect DMs to send after database operations
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
         try:
             c.execute('''SELECT adventure_id, guild_id, user_id, dragons_sent, adventure_type, returns_at, double_loot
