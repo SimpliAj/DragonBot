@@ -1378,7 +1378,11 @@ class EventsCog(commands.Cog):
     
                         # Apply perks
                         base_amount = 1
-                        final_amount, pack_rewards, time_bonus, perks_applied = apply_perks(guild_id, message.author.id, base_amount, dragon_key)
+                        try:
+                            final_amount, pack_rewards, time_bonus, perks_applied = await asyncio.to_thread(apply_perks, guild_id, message.author.id, base_amount, dragon_key)
+                        except Exception as _perks_err:
+                            logger.error(f"[catch] apply_perks failed (non-fatal): {_perks_err}")
+                            final_amount, pack_rewards, time_bonus, perks_applied = base_amount, [], 0, []
     
                         # Apply items (Night Vision, Dragon Magnet)
                         final_amount = apply_items(guild_id, message.author.id, final_amount)
@@ -1444,7 +1448,7 @@ class EventsCog(commands.Cog):
                         # Add dragons and coins to user
                         if final_amount > 0:
                             await add_dragons(guild_id, message.author.id, dragon_key, final_amount)
-                            bingo_just_completed = update_bingo_on_catch(guild_id, message.author.id, dragon_key)
+                            bingo_just_completed = await asyncio.to_thread(update_bingo_on_catch, guild_id, message.author.id, dragon_key)
                             base_coins = max(2, int(dragon_data['value'] * final_amount))
                             coins_earned = base_coins
     
