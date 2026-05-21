@@ -24,7 +24,7 @@ class AdventuresCog(commands.Cog):
             app_commands.Choice(name="Dark Abyss (48h cooldown)",            value="dark_abyss"),
         ]
         try:
-            conn = sqlite3.connect('dragon_bot.db', timeout=10.0)
+            conn = get_db_connection()
             c = conn.cursor()
             c.execute('''SELECT adventure_type FROM user_adventures
                          WHERE guild_id = ? AND user_id = ? AND status = 'active' AND returns_at > ?''',

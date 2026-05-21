@@ -52,9 +52,7 @@ def safe_db_operation(func, max_retries: int = RETRY_MAX_ATTEMPTS, retry_delay: 
 def get_dragonnest_upgrade_level(guild_id: int, user_id: int) -> int:
     """Get the Dragon Nest upgrade level for a user."""
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=DB_TIMEOUT_SHORT)
-        conn.execute('PRAGMA journal_mode=WAL')
-        conn.execute(f'PRAGMA busy_timeout={DB_BUSY_TIMEOUT}')
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute('SELECT upgrade_level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
                   (guild_id, user_id))
@@ -71,9 +69,7 @@ def is_player_softlocked(guild_id: int, user_id: int) -> tuple:
     Returns (is_softlocked, current_upgrade_level).
     """
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=DB_TIMEOUT_SHORT)
-        conn.execute('PRAGMA journal_mode=WAL')
-        conn.execute(f'PRAGMA busy_timeout={DB_BUSY_TIMEOUT}')
+        conn = get_db_connection()
         c = conn.cursor()
 
         c.execute('SELECT upgrade_level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
@@ -101,8 +97,13 @@ def is_player_softlocked(guild_id: int, user_id: int) -> tuple:
 
 
 # ==================== DATABASE INITIALIZATION ====================
+_db_initialized = False
+
 def init_db():
-    """Initialize SQLite database with all tables."""
+    global _db_initialized
+    if _db_initialized:
+        return
+    _db_initialized = True
     conn = get_db_connection(timeout=DB_TIMEOUT_LONG)
     c = conn.cursor()
 
@@ -983,8 +984,7 @@ _SERVER_CONFIG_DEFAULTS = {
 def get_server_config(guild_id: int) -> dict:
     """Return server config dict for a guild. Falls back to defaults."""
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=DB_TIMEOUT_SHORT)
-        conn.execute('PRAGMA journal_mode=WAL')
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute('''SELECT raids_enabled, raid_times, blackmarket_enabled,
                             blackmarket_interval_hours, blackmarket_max_per_day
@@ -1014,8 +1014,7 @@ def update_server_config(guild_id: int, key: str, value) -> bool:
         import json as _json
         if isinstance(value, (list, dict)):
             value = _json.dumps(value)
-        conn = sqlite3.connect(DB_PATH, timeout=DB_TIMEOUT_SHORT)
-        conn.execute('PRAGMA journal_mode=WAL')
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute('INSERT OR IGNORE INTO guild_settings (guild_id) VALUES (?)', (guild_id,))
         c.execute(f'UPDATE guild_settings SET {key} = ? WHERE guild_id = ?', (value, guild_id))
