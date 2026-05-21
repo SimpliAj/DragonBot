@@ -58,8 +58,25 @@ class DragonpassCog(commands.Cog):
 
         conn.close()
 
-        # Auto level-up if all 4 quests are complete but level hasn't incremented yet
         quests_check = ast.literal_eval(quests_active) if quests_active else []
+        for _q in quests_check:
+            if _q.get('type') == 'vote_topgg' and not _q.get('completed'):
+                try:
+                    _vc = get_db_connection()
+                    _vr = _vc.execute('SELECT last_vote_time FROM vote_streaks WHERE user_id = ?', (interaction.user.id,)).fetchone()
+                    _vc.close()
+                    if _vr and _vr[0] and (current_time - _vr[0]) < 43200:
+                        _q['progress'] = 1
+                        _q['completed'] = True
+                        _sc = get_db_connection()
+                        _sc.execute('UPDATE dragonpass SET quests_active = ? WHERE guild_id = ? AND user_id = ?',
+                                    (str(quests_check), interaction.guild_id, interaction.user.id))
+                        _sc.commit()
+                        _sc.close()
+                        quests_active = str(quests_check)
+                except Exception:
+                    pass
+                break
         if len(quests_check) == 4 and all(q.get('completed') for q in quests_check) and level < 30:
             new_level = level + 1
             if new_level not in claimed_levels:
@@ -316,6 +333,23 @@ class DragonpassCog(commands.Cog):
                             conn2.close()
 
                         quests = ast.literal_eval(quests_active) if quests_active else []
+                        for _q in quests:
+                            if _q.get('type') == 'vote_topgg' and not _q.get('completed'):
+                                try:
+                                    _vc2 = get_db_connection()
+                                    _vr2 = _vc2.execute('SELECT last_vote_time FROM vote_streaks WHERE user_id = ?', (_owner_id,)).fetchone()
+                                    _vc2.close()
+                                    if _vr2 and _vr2[0] and (current_time - _vr2[0]) < 43200:
+                                        _q['progress'] = 1
+                                        _q['completed'] = True
+                                        _sc2 = get_db_connection()
+                                        _sc2.execute('UPDATE dragonpass SET quests_active = ? WHERE guild_id = ? AND user_id = ?',
+                                                     (str(quests), back_inter.guild_id, _owner_id))
+                                        _sc2.commit()
+                                        _sc2.close()
+                                except Exception:
+                                    pass
+                                break
                         completed_count = sum(1 for q in quests if q.get('completed', False))
                         progress_bar = "".join("🟩" if i < completed_count else "🟥" for i in range(4))
 
@@ -433,6 +467,23 @@ class DragonpassCog(commands.Cog):
                 conn.close()
 
                 quests = ast.literal_eval(quests_active) if quests_active else []
+                for _q in quests:
+                    if _q.get('type') == 'vote_topgg' and not _q.get('completed'):
+                        try:
+                            _vc3 = get_db_connection()
+                            _vr3 = _vc3.execute('SELECT last_vote_time FROM vote_streaks WHERE user_id = ?', (interaction.user.id,)).fetchone()
+                            _vc3.close()
+                            if _vr3 and _vr3[0] and (current_time - _vr3[0]) < 43200:
+                                _q['progress'] = 1
+                                _q['completed'] = True
+                                _sc3 = get_db_connection()
+                                _sc3.execute('UPDATE dragonpass SET quests_active = ? WHERE guild_id = ? AND user_id = ?',
+                                             (str(quests), interaction.guild_id, interaction.user.id))
+                                _sc3.commit()
+                                _sc3.close()
+                        except Exception:
+                            pass
+                        break
                 completed_count = sum(1 for q in quests if q.get('completed', False))
 
                 progress_bar = ""

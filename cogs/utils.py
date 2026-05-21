@@ -418,6 +418,19 @@ def check_dragonpass_quests(guild_id: int, user_id: int, action_type: str, amoun
                         quests = generate_dragonpass_quests(current_time, guild_id, user_id)
                         quest_refresh_time = current_time + 43200
                         needs_quest_regen = True
+                    else:
+                        for q in quests:
+                            if q.get('type') == 'vote_topgg' and not q.get('completed'):
+                                try:
+                                    c.execute('SELECT last_vote_time FROM vote_streaks WHERE user_id = ?', (user_id,))
+                                    vr = c.fetchone()
+                                    if vr and vr[0] and (current_time - vr[0]) < 43200:
+                                        q['progress'] = 1
+                                        q['completed'] = True
+                                        needs_quest_regen = True
+                                except Exception:
+                                    pass
+                                break
 
             if not quests:
                 quests = generate_dragonpass_quests(current_time, guild_id, user_id)
