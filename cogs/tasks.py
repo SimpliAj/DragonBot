@@ -164,6 +164,7 @@ class TasksCog(commands.Cog):
             current_hour = vienna_time.hour
 
             for guild in self.bot.guilds:
+                conn = None
                 try:
                     guild_id = guild.id
 
@@ -459,10 +460,11 @@ class TasksCog(commands.Cog):
                                     if guild_id in raid_boss_active:
                                         del raid_boss_active[guild_id]
 
-                    conn.close()
-
                 except Exception as e:
                     print(f"❌ Error in auto_manage_raid_bosses for guild {guild_id}: {e}")
+                finally:
+                    if conn:
+                        conn.close()
 
         except Exception as e:
             print(f"❌ Critical error in auto_manage_raid_bosses: {e}")
@@ -1416,11 +1418,10 @@ class TasksCog(commands.Cog):
     @tasks.loop(minutes=1)
     async def process_breeding_queue(self):
         """Process queued breedings every minute - starts when cooldown is ready"""
-        conn = get_db_connection()
-        c = conn.cursor()
-
-        # Get ALL pending breedings (not filtered by scheduled_for anymore)
+        conn = None
         try:
+            conn = get_db_connection()
+            c = conn.cursor()
             c.execute('''SELECT queue_id, guild_id, user_id, parent1_type, parent2_type
                      FROM breeding_queue
                      WHERE status = 'pending'
@@ -1428,10 +1429,12 @@ class TasksCog(commands.Cog):
             all_breedings = c.fetchall()
         except Exception as e:
             logger.error(f"process_breeding_queue initial query failed: {e}", exc_info=True)
-            conn.close()
+            if conn:
+                conn.close()
             return
 
-        for queue_id, guild_id, user_id, parent1, parent2 in all_breedings:
+        try:
+          for queue_id, guild_id, user_id, parent1, parent2 in all_breedings:
             try:
                 current_time = int(time.time())
                 # NORMALIZE dragon types from DB
@@ -1743,10 +1746,15 @@ class TasksCog(commands.Cog):
 
             except Exception as e:
                 print(f"Breeding queue error: {e}")
-                c.execute('UPDATE breeding_queue SET status = "error" WHERE queue_id = ?', (queue_id,))
-                conn.commit()
+                try:
+                    c.execute('UPDATE breeding_queue SET status = "error" WHERE queue_id = ?', (queue_id,))
+                    conn.commit()
+                except Exception:
+                    pass
 
-        conn.close()
+        finally:
+            if conn:
+                conn.close()
 
     @process_breeding_queue.error
     async def on_process_breeding_queue_error(self, error):
@@ -1795,19 +1803,22 @@ class TasksCog(commands.Cog):
         current_time = int(time.time())
         dms_to_send = []  # Collect DMs to send after database operations
 
-        conn = get_db_connection()
-        c = conn.cursor()
+        conn = None
         try:
+            conn = get_db_connection()
+            c = conn.cursor()
             c.execute('''SELECT adventure_id, guild_id, user_id, dragons_sent, adventure_type, returns_at, double_loot
                          FROM user_adventures
                          WHERE status = 'active' AND returns_at <= ? AND claimed = 0''', (current_time,))
             completed = c.fetchall()
         except Exception as e:
             logger.error(f"process_adventures_sync initial query failed: {e}", exc_info=True)
-            conn.close()
+            if conn:
+                conn.close()
             return dms_to_send
 
-        for adventure_id, guild_id, user_id, dragons_json, adv_type, returns_at, double_loot in completed:
+        try:
+          for adventure_id, guild_id, user_id, dragons_json, adv_type, returns_at, double_loot in completed:
             try:
                 # Ensure IDs are integers and handle None values
                 adventure_id = int(adventure_id) if adventure_id else 0
@@ -2006,7 +2017,10 @@ class TasksCog(commands.Cog):
                 logger.error(f"Adventure processing error for adventure_id {adventure_id}: {e}", exc_info=True)
                 print(f"Adventure processing error: {e}")
 
-        conn.close()
+          return dms_to_send
+        finally:
+            if conn:
+                conn.close()
         return dms_to_send
 
     @process_adventures.error
