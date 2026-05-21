@@ -78,18 +78,21 @@ async def spawn_dragon(guild_id: int, channel, bot=None, catcher_id: int = None)
     # Apply server-wide Alpha coin boost for display
     server_alpha_count = 0
     for _attempt in range(5):
+        _ac = None
         try:
-            conn = get_db_connection()
-            c = conn.cursor()
+            _ac = get_db_connection()
+            c = _ac.cursor()
             c.execute('SELECT COUNT(*) FROM user_alphas WHERE guild_id = ?', (guild_id,))
             server_alpha_count = c.fetchone()[0]
-            conn.close()
             break
         except Exception as _e:
             if _attempt < 4:
                 await asyncio.sleep(0.5 * (_attempt + 1))
             else:
                 logger.warning(f"[spawn] alpha count failed after 5 retries: {_e}")
+        finally:
+            if _ac:
+                _ac.close()
 
     displayed_coins = base_coin_reward
     if server_alpha_count > 0:
@@ -120,16 +123,21 @@ async def spawn_dragon(guild_id: int, channel, bot=None, catcher_id: int = None)
         'night_vision_activator': nv_activator
     }
 
+    def _persist_spawn(gid, dk, ch_id, m_id, ts, nv):
+        conn = get_db_connection()
+        try:
+            c = conn.cursor()
+            c.execute(
+                'INSERT OR REPLACE INTO active_dragon_spawns (guild_id, dragon_type, channel_id, message_id, spawn_timestamp, night_vision_activator) VALUES (?, ?, ?, ?, ?, ?)',
+                (gid, dk, ch_id, m_id, ts, nv)
+            )
+            c.execute('INSERT INTO dragon_spawn_log (guild_id, dragon_type, spawned_at) VALUES (?, ?, ?)', (gid, dk, ts))
+            conn.commit()
+        finally:
+            conn.close()
+
     try:
-        _conn = get_db_connection()
-        _c = _conn.cursor()
-        _c.execute(
-            'INSERT OR REPLACE INTO active_dragon_spawns (guild_id, dragon_type, channel_id, message_id, spawn_timestamp, night_vision_activator) VALUES (?, ?, ?, ?, ?, ?)',
-            (guild_id, dragon_key, channel.id, msg.id, spawn_ts, nv_activator)
-        )
-        _c.execute('INSERT INTO dragon_spawn_log (guild_id, dragon_type, spawned_at) VALUES (?, ?, ?)', (guild_id, dragon_key, spawn_ts))
-        _conn.commit()
-        _conn.close()
+        await asyncio.to_thread(_persist_spawn, guild_id, dragon_key, channel.id, msg.id, spawn_ts, nv_activator)
     except Exception as _e:
         logger.error(f'[spawn] Failed to persist active spawn: {_e}')
 
@@ -834,6 +842,50 @@ class RaidAttackView(discord.ui.View):
             conn_a.close()
 
 
+def _db_record_catch(guild_id, user_id, dragon_key, catch_time):
+    conn = get_db_connection()
+    try:
+        c = conn.cursor()
+        c.execute('SELECT dragon_type FROM server_discoveries WHERE guild_id = ? AND dragon_type = ?',
+                  (guild_id, dragon_key))
+        if not c.fetchone():
+            c.execute('''INSERT INTO server_discoveries (guild_id, dragon_type, first_discovered_by, first_discovered_at, total_caught)
+                         VALUES (?, ?, ?, ?, 1)''',
+                      (guild_id, dragon_key, user_id, int(time.time())))
+        else:
+            c.execute('UPDATE server_discoveries SET total_caught = total_caught + 1 WHERE guild_id = ? AND dragon_type = ?',
+                      (guild_id, dragon_key))
+        c.execute('SELECT fastest_catch, slowest_catch FROM user_dragons WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
+                  (guild_id, user_id, dragon_key))
+        rec = c.fetchone()
+        if rec:
+            fastest = min(rec[0] if rec[0] > 0 else catch_time, catch_time)
+            slowest = max(rec[1] if rec[1] > 0 else catch_time, catch_time)
+            c.execute('UPDATE user_dragons SET fastest_catch = ?, slowest_catch = ? WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
+                      (fastest, slowest, guild_id, user_id, dragon_key))
+        else:
+            c.execute('INSERT INTO user_dragons (guild_id, user_id, dragon_type, count, fastest_catch, slowest_catch) VALUES (?, ?, ?, 0, ?, ?)',
+                      (guild_id, user_id, dragon_key, catch_time, catch_time))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _db_get_alpha_data(guild_id, user_id):
+    conn = get_db_connection()
+    try:
+        c = conn.cursor()
+        c.execute('SELECT u.user_id, u.name FROM user_alphas u WHERE u.guild_id = ?', (guild_id,))
+        all_alphas = c.fetchall()
+        c.execute('SELECT COUNT(*) FROM user_alphas WHERE guild_id = ?', (guild_id,))
+        server_alpha_count = c.fetchone()[0]
+        c.execute('SELECT COUNT(*) FROM user_alphas WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
+        user_alpha_count = c.fetchone()[0]
+        return all_alphas, server_alpha_count, user_alpha_count
+    finally:
+        conn.close()
+
+
 class EventsCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -841,7 +893,7 @@ class EventsCog(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         logger.info(f'{self.bot.user} is online!')
-        init_db()
+        await asyncio.to_thread(init_db)
 
         # Sync slash commands with Discord
         try:
@@ -1317,45 +1369,12 @@ class EventsCog(commands.Cog):
                                 item_boost_message = "\n🌙 **Night Vision** (inactive - only works 20:00-08:00)"
     
                         catch_time = time.time() - spawn_data['timestamp']
-    
-                        # Record discovery if first time caught in server
-                        conn = get_db_connection()
-                        c = conn.cursor()
-                        c.execute('SELECT dragon_type FROM server_discoveries WHERE guild_id = ? AND dragon_type = ?',
-                                  (guild_id, dragon_key))
-                        discovery = c.fetchone()
-                        if not discovery:
-                            c.execute('''INSERT INTO server_discoveries (guild_id, dragon_type, first_discovered_by, first_discovered_at, total_caught)
-                                         VALUES (?, ?, ?, ?, 1)''',
-                                      (guild_id, dragon_key, message.author.id, int(time.time())))
-                        else:
-                            c.execute('UPDATE server_discoveries SET total_caught = total_caught + 1 WHERE guild_id = ? AND dragon_type = ?',
-                                      (guild_id, dragon_key))
-    
-                        # Update catch time records
-                        c.execute('SELECT fastest_catch, slowest_catch FROM user_dragons WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
-                                  (guild_id, message.author.id, dragon_key))
-                        catch_record = c.fetchone()
-    
-                        if catch_record:
-                            fastest = catch_record[0] if catch_record[0] > 0 else catch_time
-                            slowest = catch_record[1] if catch_record[1] > 0 else catch_time
-    
-                            if catch_time < fastest:
-                                fastest = catch_time
-                            if catch_time > slowest:
-                                slowest = catch_time
-    
-                            c.execute('''UPDATE user_dragons SET fastest_catch = ?, slowest_catch = ?
-                                         WHERE guild_id = ? AND user_id = ? AND dragon_type = ?''',
-                                      (fastest, slowest, guild_id, message.author.id, dragon_key))
-                        else:
-                            c.execute('''INSERT INTO user_dragons (guild_id, user_id, dragon_type, count, fastest_catch, slowest_catch)
-                                         VALUES (?, ?, ?, 0, ?, ?)''',
-                                      (guild_id, message.author.id, dragon_key, catch_time, catch_time))
-    
-                        conn.commit()
-                        conn.close()
+
+                        # Record discovery + update catch time records (in thread to avoid blocking event loop)
+                        try:
+                            await asyncio.to_thread(_db_record_catch, guild_id, message.author.id, dragon_key, catch_time)
+                        except Exception as _rec_err:
+                            logger.error(f"[catch] _db_record_catch failed (non-fatal): {_rec_err}")
     
                         # Apply perks
                         base_amount = 1
@@ -1383,55 +1402,51 @@ class EventsCog(commands.Cog):
                         alpha_dragon_name = None
                         alpha_multiplier = 1
                         dragonscale_event_minutes = 0
-    
-                        conn = get_db_connection()
-                        c = conn.cursor()
-    
-                        c.execute('''SELECT u.user_id, u.name FROM user_alphas u
-                                     WHERE u.guild_id = ?''', (guild_id,))
-                        all_alphas = c.fetchall()
-    
-                        if all_alphas and random.random() < 0.05:
-                            alpha_owner_id, alpha_name = random.choice(all_alphas)
-                            alpha_owner = message.guild.get_member(alpha_owner_id)
-    
-                            if random.random() < 0.95:
-                                rng = random.random()
-                                if rng < 0.75:
-                                    alpha_multiplier = 2
+
+                        all_alphas, server_alpha_count, user_alpha_count = await asyncio.to_thread(
+                            _db_get_alpha_data, guild_id, message.author.id)
+
+                        _conn_alpha = get_db_connection()
+                        try:
+                            _c_alpha = _conn_alpha.cursor()
+
+                            if all_alphas and random.random() < 0.05:
+                                alpha_owner_id, alpha_name = random.choice(all_alphas)
+                                alpha_owner = message.guild.get_member(alpha_owner_id)
+
+                                if random.random() < 0.95:
+                                    rng = random.random()
+                                    if rng < 0.75:
+                                        alpha_multiplier = 2
+                                    else:
+                                        alpha_multiplier = 3
+                                    final_amount *= alpha_multiplier
+                                    alpha_effect_triggered = True
+                                    alpha_owner_name = alpha_owner.display_name if alpha_owner else "Unknown"
+                                    alpha_dragon_name = alpha_name
                                 else:
-                                    alpha_multiplier = 3
-                                final_amount *= alpha_multiplier
-                                alpha_effect_triggered = True
-                                alpha_owner_name = alpha_owner.display_name if alpha_owner else "Unknown"
-                                alpha_dragon_name = alpha_name
-                            else:
-                                dragonscale_event_minutes = 0.5
-                                dragonscale_event_seconds = 30
-    
-                                if guild_id not in active_dragonscales or active_dragonscales[guild_id] <= current_time:
-                                    active_dragonscales[guild_id] = current_time + dragonscale_event_seconds
-                                    dragonscale_event_starts[guild_id] = current_time
-                                else:
-                                    active_dragonscales[guild_id] += dragonscale_event_seconds
-    
-                                conn.commit()
-                                alpha_effect_triggered = True
-                                alpha_owner_name = alpha_owner.display_name if alpha_owner else "Unknown"
-                                alpha_dragon_name = alpha_name
-    
+                                    dragonscale_event_minutes = 0.5
+                                    dragonscale_event_seconds = 30
+
+                                    if guild_id not in active_dragonscales or active_dragonscales[guild_id] <= current_time:
+                                        active_dragonscales[guild_id] = current_time + dragonscale_event_seconds
+                                        dragonscale_event_starts[guild_id] = current_time
+                                    else:
+                                        active_dragonscales[guild_id] += dragonscale_event_seconds
+
+                                    _conn_alpha.commit()
+                                    alpha_effect_triggered = True
+                                    alpha_owner_name = alpha_owner.display_name if alpha_owner else "Unknown"
+                                    alpha_dragon_name = alpha_name
+                        finally:
+                            _conn_alpha.close()
+
                         # Add dragons and coins to user
                         if final_amount > 0:
                             await add_dragons(guild_id, message.author.id, dragon_key, final_amount)
                             bingo_just_completed = update_bingo_on_catch(guild_id, message.author.id, dragon_key)
                             base_coins = max(2, int(dragon_data['value'] * final_amount))
                             coins_earned = base_coins
-    
-                            c.execute('SELECT COUNT(*) FROM user_alphas WHERE guild_id = ?', (guild_id,))
-                            server_alpha_count = c.fetchone()[0]
-    
-                            c.execute('SELECT COUNT(*) FROM user_alphas WHERE guild_id = ? AND user_id = ?', (guild_id, message.author.id))
-                            user_alpha_count = c.fetchone()[0]
     
                             server_coin_bonus = server_alpha_count * 0.08
                             user_coin_bonus = user_alpha_count * 0.15
@@ -1457,17 +1472,16 @@ class EventsCog(commands.Cog):
     
                                 try:
                                     conn_df = get_db_connection()
-                                    c_df = conn_df.cursor()
-    
-                                    c_df.execute('''INSERT INTO dragonfest_event_log
-                                                   (guild_id, user_id, event_start, dragon_type, amount, caught_at)
-                                                   VALUES (?, ?, ?, ?, ?, ?)''',
-                                                (guild_id, message.author.id, event_start, dragon_key, final_amount, int(time.time())))
-    
-                                    c_df.close()
-                                    conn_df.close()
-    
-                                    logger.info(f"[DRAGONFEST] Logged {dragon_key}x{final_amount}")
+                                    try:
+                                        c_df = conn_df.cursor()
+                                        c_df.execute('''INSERT INTO dragonfest_event_log
+                                                       (guild_id, user_id, event_start, dragon_type, amount, caught_at)
+                                                       VALUES (?, ?, ?, ?, ?, ?)''',
+                                                    (guild_id, message.author.id, event_start, dragon_key, final_amount, int(time.time())))
+                                        conn_df.commit()
+                                        logger.info(f"[DRAGONFEST] Logged {dragon_key}x{final_amount}")
+                                    finally:
+                                        conn_df.close()
                                 except Exception as e:
                                     logger.error(f"[DRAGONFEST] LOG ERROR: {e}")
     
@@ -1477,17 +1491,16 @@ class EventsCog(commands.Cog):
     
                                 try:
                                     conn_ds = get_db_connection()
-                                    c_ds = conn_ds.cursor()
-    
-                                    c_ds.execute('''INSERT INTO dragonscale_event_log
-                                                   (guild_id, user_id, event_start, dragon_type, amount, caught_at)
-                                                   VALUES (?, ?, ?, ?, ?, ?)''',
-                                                (guild_id, message.author.id, event_start, dragon_key, final_amount, int(time.time())))
-    
-                                    c_ds.close()
-                                    conn_ds.close()
-    
-                                    logger.info(f"[DRAGONSCALE] Logged {dragon_key}x{final_amount}")
+                                    try:
+                                        c_ds = conn_ds.cursor()
+                                        c_ds.execute('''INSERT INTO dragonscale_event_log
+                                                       (guild_id, user_id, event_start, dragon_type, amount, caught_at)
+                                                       VALUES (?, ?, ?, ?, ?, ?)''',
+                                                    (guild_id, message.author.id, event_start, dragon_key, final_amount, int(time.time())))
+                                        conn_ds.commit()
+                                        logger.info(f"[DRAGONSCALE] Logged {dragon_key}x{final_amount}")
+                                    finally:
+                                        conn_ds.close()
                                 except Exception as e:
                                     logger.error(f"[DRAGONSCALE] LOG ERROR: {e}")
                             else:
@@ -1499,11 +1512,13 @@ class EventsCog(commands.Cog):
                             is_rare = dragon_rarity_index >= 6
     
                             conn_dp = get_db_connection()
-                            c_dp = conn_dp.cursor()
-                            c_dp.execute('SELECT level FROM dragonpass WHERE guild_id = ? AND user_id = ?', (guild_id, message.author.id))
-                            dp_result = c_dp.fetchone()
-                            current_dp_level = dp_result[0] if dp_result else 0
-                            conn_dp.close()
+                            try:
+                                c_dp = conn_dp.cursor()
+                                c_dp.execute('SELECT level FROM dragonpass WHERE guild_id = ? AND user_id = ?', (guild_id, message.author.id))
+                                dp_result = c_dp.fetchone()
+                                current_dp_level = dp_result[0] if dp_result else 0
+                            finally:
+                                conn_dp.close()
     
                             result = await asyncio.to_thread(check_dragonpass_quests, guild_id, message.author.id, 'catch_dragon', final_amount, dragon_key, catch_time)
                             _r2 = await asyncio.to_thread(check_dragonpass_quests, guild_id, message.author.id, 'earn_coins', int(coins_earned))
@@ -1745,11 +1760,13 @@ class EventsCog(commands.Cog):
                                 await award_trophy(self.bot, guild_id, message.author.id, 'mythic_hunter')
     
                             _conn_s = get_db_connection()
-                            _c_s = _conn_s.cursor()
-                            _c_s.execute('SELECT COUNT(*) FROM user_dragons WHERE guild_id = ? AND user_id = ? AND count > 0',
-                                         (guild_id, message.author.id))
-                            _unique = _c_s.fetchone()[0]
-                            _conn_s.close()
+                            try:
+                                _c_s = _conn_s.cursor()
+                                _c_s.execute('SELECT COUNT(*) FROM user_dragons WHERE guild_id = ? AND user_id = ? AND count > 0',
+                                             (guild_id, message.author.id))
+                                _unique = _c_s.fetchone()[0]
+                            finally:
+                                _conn_s.close()
                             if _unique >= len(DRAGON_TYPES):
                                 await award_trophy(self.bot, guild_id, message.author.id, 'dragon_scholar')
     
@@ -1772,15 +1789,17 @@ class EventsCog(commands.Cog):
                         # Add packs if any
                         if pack_rewards:
                             conn = get_db_connection()
-                            c = conn.cursor()
-                            for pack_tier in pack_rewards:
-                                c.execute('''INSERT INTO user_packs (guild_id, user_id, pack_type, count)
-                                             VALUES (?, ?, ?, 1)
-                                             ON CONFLICT(guild_id, user_id, pack_type)
-                                             DO UPDATE SET count = count + 1''',
-                                          (guild_id, message.author.id, pack_tier))
-                            conn.commit()
-                            conn.close()
+                            try:
+                                c = conn.cursor()
+                                for pack_tier in pack_rewards:
+                                    c.execute('''INSERT INTO user_packs (guild_id, user_id, pack_type, count)
+                                                 VALUES (?, ?, ?, 1)
+                                                 ON CONFLICT(guild_id, user_id, pack_type)
+                                                 DO UPDATE SET count = count + 1''',
+                                              (guild_id, message.author.id, pack_tier))
+                                conn.commit()
+                            finally:
+                                conn.close()
     
                         # Extend dragonscale time if applicable
                         if time_bonus > 0 and guild_id in active_dragonscales:
@@ -1878,11 +1897,13 @@ class EventsCog(commands.Cog):
                         logger.error(f"[catch] reward processing error: {_catch_err}", exc_info=True)
                         if not _catch_embed_sent:
                             try:
+                                _fb_catch_time = round(time.time() - spawn_data.get('timestamp', time.time()), 1)
                                 fallback = discord.Embed(
                                     title=f"🎉 {message.author.display_name} caught the dragon!",
                                     description=f"{dragon_data['emoji']} **{dragon_data['name']} Dragon** caught!",
                                     color=discord.Color.gold()
                                 )
+                                fallback.add_field(name="⏱️ Catch Time", value=f"{_fb_catch_time}s", inline=True)
                                 await message.channel.send(embed=fallback)
                             except Exception:
                                 pass
