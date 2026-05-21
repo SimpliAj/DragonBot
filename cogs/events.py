@@ -1330,6 +1330,7 @@ class EventsCog(commands.Cog):
 
                     del active_spawns[guild_id]
 
+                    conn_catch = None
                     try:
                         conn_catch = get_db_connection()
                         c_catch = conn_catch.cursor()
@@ -1339,9 +1340,11 @@ class EventsCog(commands.Cog):
                         c_catch.execute('INSERT INTO dragon_catch_log (guild_id, user_id, dragon_type, caught_at) VALUES (?, ?, ?, ?)',
                                       (guild_id, message.author.id, dragon_key, int(time.time())))
                         conn_catch.commit()
-                        conn_catch.close()
                     except:
                         pass
+                    finally:
+                        if conn_catch:
+                            conn_catch.close()
 
                     last_catch_attempts[guild_id] = {
                         'user_id': message.author.id,
@@ -1353,6 +1356,7 @@ class EventsCog(commands.Cog):
                     dragon_data = DRAGON_TYPES[dragon_key]
                     item_boost_message = ""
                     _catch_embed_sent = False
+                    _conn_nest = None
                     try:
     
                         # Check for Night Vision
@@ -1574,21 +1578,21 @@ class EventsCog(commands.Cog):
                                 await message.channel.send(embed=levelup_embed)
     
                             # Check and update Dragon Nest bounties
-                            conn = get_db_connection()
-                            c = conn.cursor()
+                            _conn_nest = get_db_connection()
+                            _c_nest = _conn_nest.cursor()
     
-                            c.execute('SELECT expires_at FROM raid_bosses WHERE guild_id = ? AND expires_at > ?',
+                            _c_nest.execute('SELECT expires_at FROM raid_bosses WHERE guild_id = ? AND expires_at > ?',
                                       (guild_id, int(time.time())))
-                            raid_active = c.fetchone()
+                            raid_active = _c_nest.fetchone()
     
-                            c.execute('SELECT active_until FROM dragon_nest_active WHERE guild_id = ? AND user_id = ?',
+                            _c_nest.execute('SELECT active_until FROM dragon_nest_active WHERE guild_id = ? AND user_id = ?',
                                       (guild_id, message.author.id))
-                            active_result = c.fetchone()
+                            active_result = _c_nest.fetchone()
     
                             if active_result and active_result[0] > int(time.time()) and not raid_active:
-                                c.execute('SELECT bounties_active, speedrun_catches, level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
+                                _c_nest.execute('SELECT bounties_active, speedrun_catches, level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
                                           (guild_id, message.author.id))
-                                nest_result = c.fetchone()
+                                nest_result = _c_nest.fetchone()
     
                                 if nest_result and nest_result[0]:
                                     import ast
@@ -1615,20 +1619,20 @@ class EventsCog(commands.Cog):
     
                                     new_speedrun = speedrun_catches + final_amount
     
-                                    c.execute('UPDATE dragon_nest SET bounties_active = ?, speedrun_catches = ? WHERE guild_id = ? AND user_id = ?',
+                                    _c_nest.execute('UPDATE dragon_nest SET bounties_active = ?, speedrun_catches = ? WHERE guild_id = ? AND user_id = ?',
                                               (str(bounties), new_speedrun, guild_id, message.author.id))
     
                                     total_bounties = len(bounties)
                                     if bounties_completed >= total_bounties:
-                                        c.execute('UPDATE dragon_nest SET bounties_completed = bounties_completed + 1 WHERE guild_id = ? AND user_id = ?',
+                                        _c_nest.execute('UPDATE dragon_nest SET bounties_completed = bounties_completed + 1 WHERE guild_id = ? AND user_id = ?',
                                                   (guild_id, message.author.id))
     
                                         if nest_level < 10:
                                             new_level = nest_level + 1
     
-                                            c.execute('SELECT SUM(count) FROM user_dragons WHERE guild_id = ? AND user_id = ?',
+                                            _c_nest.execute('SELECT SUM(count) FROM user_dragons WHERE guild_id = ? AND user_id = ?',
                                                      (guild_id, message.author.id))
-                                            total_dragons_result = c.fetchone()
+                                            total_dragons_result = _c_nest.fetchone()
                                             total_dragons = total_dragons_result[0] if total_dragons_result and total_dragons_result[0] else 0
     
                                             if new_level <= 3:
@@ -1640,9 +1644,9 @@ class EventsCog(commands.Cog):
     
                                             dragons_to_sacrifice = max(1, int(total_dragons * sacrifice_percentage))
     
-                                            c.execute('SELECT dragon_type, count FROM user_dragons WHERE guild_id = ? AND user_id = ? AND count > 0',
+                                            _c_nest.execute('SELECT dragon_type, count FROM user_dragons WHERE guild_id = ? AND user_id = ? AND count > 0',
                                                      (guild_id, message.author.id))
-                                            user_dragons_list = c.fetchall()
+                                            user_dragons_list = _c_nest.fetchall()
     
                                             sacrifice_list = {}
                                             dragons_needed = dragons_to_sacrifice
@@ -1663,20 +1667,20 @@ class EventsCog(commands.Cog):
                                                 dragon_data_s = DRAGON_TYPES[dragon_type]
                                                 sacrifice_display += f"{dragon_data_s['emoji']} **{count}x {dragon_data_s['name']}**\n"
     
-                                            c.execute('''INSERT OR REPLACE INTO pending_perks (guild_id, user_id, level, perks_json)
+                                            _c_nest.execute('''INSERT OR REPLACE INTO pending_perks (guild_id, user_id, level, perks_json)
                                                          VALUES (?, ?, ?, ?)''',
                                                       (guild_id, message.author.id, new_level, json.dumps({
                                                           'sacrifice_list': sacrifice_list,
                                                           'new_level': new_level
                                                       })))
     
-                                            c.execute('UPDATE dragon_nest SET bounties_active = NULL, speedrun_catches = 0 WHERE guild_id = ? AND user_id = ?',
+                                            _c_nest.execute('UPDATE dragon_nest SET bounties_active = NULL, speedrun_catches = 0 WHERE guild_id = ? AND user_id = ?',
                                                       (guild_id, message.author.id))
     
-                                            c.execute('DELETE FROM dragon_nest_active WHERE guild_id = ? AND user_id = ?',
+                                            _c_nest.execute('DELETE FROM dragon_nest_active WHERE guild_id = ? AND user_id = ?',
                                                       (guild_id, message.author.id))
     
-                                            conn.commit()
+                                            _conn_nest.commit()
     
                                             embed = discord.Embed(
                                                 title="🎉 Dragon Nest Level Complete!",
@@ -1746,19 +1750,19 @@ class EventsCog(commands.Cog):
                                             await message.channel.send(embed=embed, view=_NestSacrificeView())
                                         else:
                                             # Max level
-                                            c.execute('UPDATE dragon_nest SET bounties_active = NULL, speedrun_catches = 0 WHERE guild_id = ? AND user_id = ?',
+                                            _c_nest.execute('UPDATE dragon_nest SET bounties_active = NULL, speedrun_catches = 0 WHERE guild_id = ? AND user_id = ?',
                                                       (guild_id, message.author.id))
-                                            c.execute('DELETE FROM dragon_nest_active WHERE guild_id = ? AND user_id = ?',
+                                            _c_nest.execute('DELETE FROM dragon_nest_active WHERE guild_id = ? AND user_id = ?',
                                                       (guild_id, message.author.id))
-                                            conn.commit()
+                                            _conn_nest.commit()
     
                                             try:
                                                 await message.channel.send(f"🎉 {message.author.mention} **Dragon Nest Complete!**\nYou've completed all bounties at max level! Well done!")
                                             except:
                                                 pass
     
-                            conn.commit()
-                            conn.close()
+                            _conn_nest.commit()
+                            _conn_nest.close()
     
                             # Trophy checks after catch
                             _dragon_data = DRAGON_TYPES.get(spawn_data['dragon_type'], {})
@@ -1903,6 +1907,12 @@ class EventsCog(commands.Cog):
     
                     except Exception as _catch_err:
                         logger.error(f"[catch] reward processing error: {_catch_err}", exc_info=True)
+                        if _conn_nest is not None:
+                            try:
+                                _conn_nest.close()
+                            except Exception:
+                                pass
+                            _conn_nest = None
                         if not _catch_embed_sent:
                             try:
                                 _fb_catch_time = round(time.time() - spawn_data.get('timestamp', time.time()), 1)
