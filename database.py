@@ -840,24 +840,23 @@ def update_balance(guild_id: int, user_id: int, amount: float):
     retry_delay = 0.1
 
     for attempt in range(max_retries):
+        conn = None
         try:
-            conn = sqlite3.connect(DB_PATH, timeout=60.0, check_same_thread=False)
-            conn.execute('PRAGMA journal_mode=WAL')
-            conn.execute('PRAGMA busy_timeout=60000')
+            conn = get_db_connection()
             c = conn.cursor()
             c.execute('UPDATE users SET balance = balance + ? WHERE guild_id = ? AND user_id = ?',
                       (amount, guild_id, user_id))
             conn.commit()
-            conn.close()
             return
         except sqlite3.OperationalError as e:
-            if 'conn' in locals():
-                conn.close()
             if attempt < max_retries - 1:
                 time.sleep(retry_delay * (2 ** attempt))
             else:
                 logger.error(f"Failed to update balance after {max_retries} retries: {e}")
                 raise
+        finally:
+            if conn:
+                conn.close()
 
 
 async def update_balance_and_check_trophies(bot, guild_id: int, user_id: int, amount: float):
@@ -867,11 +866,13 @@ async def update_balance_and_check_trophies(bot, guild_id: int, user_id: int, am
     if amount <= 0:
         return
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=60.0)
-        c = conn.cursor()
-        c.execute('SELECT balance FROM users WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
-        row = c.fetchone()
-        conn.close()
+        conn = get_db_connection()
+        try:
+            c = conn.cursor()
+            c.execute('SELECT balance FROM users WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
+            row = c.fetchone()
+        finally:
+            conn.close()
         if row and row[0] >= 1_000_000:
             from achievements import award_trophy
             await award_trophy(bot, guild_id, user_id, 'dragon_millionaire')

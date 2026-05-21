@@ -1202,345 +1202,245 @@ class MarketCog(commands.Cog):
             await interaction.followup.send(f"❌ {user.mention} doesn't have anything to trade!", ephemeral=False)
             return
 
-        # Create selection view
-        class TradeSetupView(discord.ui.View):
-            def __init__(self, your_items_list, their_items_list):
-                super().__init__(timeout=300)
-                self.your_items_list = your_items_list
-                self.their_items_list = their_items_list
-                self.selected_yours = None
-                self.your_amount = 1
+        # ─── NEW TRADE FLOW ────────────────────────────────────────────────
+        # Step 1: A selects item + amount → sends offer to B
+        # Step 2: B selects what THEY offer back + amount → proposes
+        # Step 3: A confirms or cancels the final deal
+        # ───────────────────────────────────────────────────────────────
 
-                # Your items dropdown
-                options = []
-                for item in your_items_list:
-                    options.append(discord.SelectOption(
-                        label=f"{item['name']} (Have: {item['count']})",
-                        value=f"yours_{item['type']}_{item['key']}",
-                        emoji=item['emoji']
-                    ))
+        def _build_item_options(items_list, prefix=""):
+            opts = []
+            for item in items_list[:25]:
+                opts.append(discord.SelectOption(
+                    label=f"{item['name']} (Have: {item['count']})",
+                    value=f"{prefix}{item['type']}|{item['key']}",
+                    emoji=item['emoji']
+                ))
+            return opts
 
-                select_yours = discord.ui.Select(
-                    placeholder="What do you want to trade?",
-                    options=options,
-                    min_values=1,
-                    max_values=1
-                )
-                select_yours.callback = self.select_yours_callback
-                self.add_item(select_yours)
+        def _parse_item_val(val, prefix=""):
+            clean = val[len(prefix):]
+            itype, ikey = clean.split("|", 1)
+            return itype, ikey
 
-            async def select_yours_callback(self, interaction: discord.Interaction):
-                await interaction.response.defer()
-                selected_values = (interaction.data or {}).get('values', [])
-                if not selected_values:
-                    await interaction.followup.send("❌ Please select an item!", ephemeral=True)
-                    return
+        def _find_item(items_list, item_type, item_key):
+            return next((i for i in items_list if i['type'] == item_type and i['key'] == item_key), None)
 
-                selected_value = selected_values[0]  # e.g. "yours_dragon_stone"
-
-                # Find selected item by matching full value
-                selected_item = None
-                for item in self.your_items_list:
-                    if f"yours_{item['type']}_{item['key']}" == selected_value:
-                        selected_item = item
-                        break
-
-                if not selected_item:
-                    await interaction.followup.send("❌ Item not found!")
-                    return
-
-                # Show amount selection
-                embed = discord.Embed(
-                    title="📦 Select Amount",
-                    description=f"You have: **{selected_item['count']}** {selected_item['emoji']} {selected_item['name']}",
-                    color=discord.Color.blue()
-                )
-
-                amount_options = [discord.SelectOption(label=f"{i}", value=str(i)) for i in range(1, min(selected_item['count'] + 1, 11))]
-
-                class AmountSelect(discord.ui.Select):
-                    async def callback(self, amount_interaction: discord.Interaction):
-                        self.parent_view.your_amount = int(self.values[0])
-
-                        # Now show their items to select what you want
-                        embed2 = discord.Embed(
-                            title="🤝 What do you want in return?",
-                            description=f"Select what {user.display_name} should trade",
-                            color=discord.Color.blue()
-                        )
-
-                        their_options = []
-                        for item in self.parent_view.their_items_list:
-                            their_options.append(discord.SelectOption(
-                                label=f"{item['name']} (They Have: {item['count']})",
-                                value=f"theirs_{item['type']}_{item['key']}",
-                                emoji=item['emoji']
-                            ))
-
-                        select_theirs = discord.ui.Select(
-                            placeholder="What do they trade back?",
-                            options=their_options,
-                            min_values=1,
-                            max_values=1
-                        )
-                        select_theirs.callback = lambda i: self.parent_view.select_theirs_callback(i, selected_item)
-
-                        their_view = discord.ui.View()
-                        their_view.add_item(select_theirs)
-
-                        await amount_interaction.response.send_message(embed=embed2, view=their_view, ephemeral=False)
-
-                amount_select = AmountSelect(
-                    placeholder="Select amount...",
-                    options=amount_options,
-                    min_values=1,
-                    max_values=1
-                )
-                amount_select.parent_view = self
-
-                amount_view = discord.ui.View()
-                amount_view.add_item(amount_select)
-
-                await interaction.followup.send(embed=embed, view=amount_view)
-
-            async def select_theirs_callback(self, interaction: discord.Interaction, your_item):
-                await interaction.response.defer()
-                selected_values = (interaction.data or {}).get('values', [])
-                if not selected_values:
-                    await interaction.followup.send("❌ Please select an item!", ephemeral=True)
-                    return
-
-                selected_value = selected_values[0]  # e.g. "theirs_dragon_stone"
-
-                # Find selected item by matching full value
-                selected_theirs = None
-                for item in self.their_items_list:
-                    if f"theirs_{item['type']}_{item['key']}" == selected_value:
-                        selected_theirs = item
-                        break
-
-                if not selected_theirs:
-                    await interaction.followup.send("❌ Item not found!")
-                    return
-
-                # Show amount selection for their item
-                embed = discord.Embed(
-                    title="📦 How much?",
-                    description=f"They have: **{selected_theirs['count']}** {selected_theirs['emoji']} {selected_theirs['name']}",
-                    color=discord.Color.blue()
-                )
-
-                their_amount_options = [discord.SelectOption(label=f"{i}", value=str(i)) for i in range(1, min(selected_theirs['count'] + 1, 11))]
-
-                class TheirAmountSelect(discord.ui.Select):
-                    async def callback(self, their_amount_interaction: discord.Interaction):
-                        their_amount = int(self.values[0])
-
-                        # Now create the trade offer
-                        await create_trade_offer(interaction, your_item['key'], self.parent_view.your_amount,
-                                               selected_theirs['key'], their_amount, your_item, selected_theirs)
-
-                their_amount_select = TheirAmountSelect(
-                    placeholder="Select amount...",
-                    options=their_amount_options,
-                    min_values=1,
-                    max_values=1
-                )
-                their_amount_select.parent_view = self
-
-                their_amount_view = discord.ui.View()
-                their_amount_view.add_item(their_amount_select)
-
-                await interaction.followup.send(embed=embed, view=their_amount_view)
-
-        async def create_trade_offer(init_inter, your_key, your_amount, their_key, their_amount, your_item_data, their_item_data):
-            """Create and send the trade offer"""
-            conn = get_db_connection()
-            c = conn.cursor()
-
-            # Store trade data
-            sender_data = f"{your_item_data['type']}:{your_key}:{your_amount}"
-            receiver_data = f"{their_item_data['type']}:{their_key}:{their_amount}"
-
-            c.execute('''INSERT INTO trade_offers (guild_id, sender_id, receiver_id, sender_dragons, receiver_dragons, status, created_at)
-                         VALUES (?, ?, ?, ?, ?, 'pending', ?)''',
-                      (guild_id, interaction.user.id, user.id, sender_data, receiver_data, int(time.time())))
-            trade_id = c.lastrowid
-            conn.commit()
-            conn.close()
-
-            # Create accept/decline view
-            class FinalTradeView(discord.ui.View):
-                def __init__(self):
-                    super().__init__(timeout=300)
-
-                @discord.ui.button(label="✅ Accept", style=discord.ButtonStyle.green)
-                async def accept_button(self, accept_inter: discord.Interaction, button: discord.ui.Button):
-                    if accept_inter.user.id != user.id:
-                        await accept_inter.response.send_message("❌ You can't accept this trade!", ephemeral=False)
-                        return
-
-                    conn = get_db_connection()
+        async def _execute_trade(acc_inter, s_item, s_amount, r_item, r_amount):
+            """Transfer items between sender (A) and receiver (B)."""
+            def _do_db():
+                conn = get_db_connection()
+                try:
                     c = conn.cursor()
 
-                    # Verify trade still exists
-                    c.execute('SELECT sender_dragons, receiver_dragons FROM trade_offers WHERE trade_id = ? AND status = "pending"',
-                              (trade_id,))
-                    trade = c.fetchone()
+                    def _transfer(itype, ikey, from_uid, to_uid, amt):
+                        if itype == 'lucky_charm':
+                            c.execute('UPDATE user_luckycharms SET count = count - ? WHERE guild_id = ? AND user_id = ?', (amt, guild_id, from_uid))
+                            c.execute('INSERT INTO user_luckycharms (guild_id, user_id, count) VALUES (?, ?, ?) ON CONFLICT(guild_id, user_id) DO UPDATE SET count = count + ?', (guild_id, to_uid, amt, amt))
+                        elif itype == 'dragonscale':
+                            c.execute('UPDATE dragonscales SET minutes = minutes - ? WHERE guild_id = ? AND user_id = ?', (amt, guild_id, from_uid))
+                            c.execute('INSERT INTO dragonscales (guild_id, user_id, minutes) VALUES (?, ?, ?) ON CONFLICT(guild_id, user_id) DO UPDATE SET minutes = minutes + ?', (guild_id, to_uid, amt, amt))
+                        elif itype in ('dna', 'lucky_dice', 'night_vision'):
+                            c.execute('UPDATE user_items SET count = count - ? WHERE guild_id = ? AND user_id = ? AND item_type = ?', (amt, guild_id, from_uid, itype))
+                            c.execute('INSERT INTO user_items (guild_id, user_id, item_type, count) VALUES (?, ?, ?, ?) ON CONFLICT(guild_id, user_id, item_type) DO UPDATE SET count = count + ?', (guild_id, to_uid, itype, amt, amt))
+                        elif itype == 'pack':
+                            c.execute('UPDATE user_packs SET count = count - ? WHERE guild_id = ? AND user_id = ? AND pack_type = ?', (amt, guild_id, from_uid, ikey))
+                            c.execute('INSERT INTO user_packs (guild_id, user_id, pack_type, count) VALUES (?, ?, ?, ?) ON CONFLICT(guild_id, user_id, pack_type) DO UPDATE SET count = count + ?', (guild_id, to_uid, ikey, amt, amt))
 
-                    if not trade:
-                        await accept_inter.response.send_message("❌ Trade no longer available!", ephemeral=False)
-                        conn.close()
-                        return
-
-                    sender_parts = trade[0].split(':')
-                    receiver_parts = trade[1].split(':')
-
-                    sender_type, sender_key, sender_amount = sender_parts[0], sender_parts[1], int(sender_parts[2])
-                    receiver_type, receiver_key, receiver_amount = receiver_parts[0], receiver_parts[1], int(receiver_parts[2])
-
-                    try:
-                        # Execute trade for sender (remove from sender, add to receiver)
-                        if sender_type == 'dragon':
-                            await add_dragons(guild_id, interaction.user.id, sender_key, -sender_amount)
-                            await add_dragons(guild_id, user.id, sender_key, sender_amount)
-                        elif sender_type == 'lucky_charm':
-                            c.execute('UPDATE user_luckycharms SET count = count - ? WHERE guild_id = ? AND user_id = ?',
-                                      (sender_amount, guild_id, interaction.user.id))
-                            c.execute('INSERT INTO user_luckycharms (guild_id, user_id, count) VALUES (?, ?, ?) ON CONFLICT(guild_id, user_id) DO UPDATE SET count = count + ?',
-                                      (guild_id, user.id, sender_amount, sender_amount))
-                        elif sender_type == 'dragonscale':
-                            c.execute('UPDATE dragonscales SET minutes = minutes - ? WHERE guild_id = ? AND user_id = ?',
-                                      (sender_amount, guild_id, interaction.user.id))
-                            c.execute('INSERT INTO dragonscales (guild_id, user_id, minutes) VALUES (?, ?, ?) ON CONFLICT(guild_id, user_id) DO UPDATE SET minutes = minutes + ?',
-                                      (guild_id, user.id, sender_amount, sender_amount))
-                        elif sender_type == 'dna':
-                            c.execute('UPDATE user_items SET count = count - ? WHERE guild_id = ? AND user_id = ? AND item_type = ?',
-                                      (sender_amount, guild_id, interaction.user.id, 'dna'))
-                            c.execute('INSERT INTO user_items (guild_id, user_id, item_type, count) VALUES (?, ?, ?, ?) ON CONFLICT(guild_id, user_id, item_type) DO UPDATE SET count = count + ?',
-                                      (guild_id, user.id, 'dna', sender_amount, sender_amount))
-                        elif sender_type == 'lucky_dice':
-                            c.execute('UPDATE user_items SET count = count - ? WHERE guild_id = ? AND user_id = ? AND item_type = ?',
-                                      (sender_amount, guild_id, interaction.user.id, 'lucky_dice'))
-                            c.execute('INSERT INTO user_items (guild_id, user_id, item_type, count) VALUES (?, ?, ?, ?) ON CONFLICT(guild_id, user_id, item_type) DO UPDATE SET count = count + ?',
-                                      (guild_id, user.id, 'lucky_dice', sender_amount, sender_amount))
-                        elif sender_type == 'night_vision':
-                            c.execute('UPDATE user_items SET count = count - ? WHERE guild_id = ? AND user_id = ? AND item_type = ?',
-                                      (sender_amount, guild_id, interaction.user.id, 'night_vision'))
-                            c.execute('INSERT INTO user_items (guild_id, user_id, item_type, count) VALUES (?, ?, ?, ?) ON CONFLICT(guild_id, user_id, item_type) DO UPDATE SET count = count + ?',
-                                      (guild_id, user.id, 'night_vision', sender_amount, sender_amount))
-                        elif sender_type == 'pack':
-                            c.execute('UPDATE user_packs SET count = count - ? WHERE guild_id = ? AND user_id = ? AND pack_type = ?',
-                                      (sender_amount, guild_id, interaction.user.id, sender_key))
-                            c.execute('INSERT INTO user_packs (guild_id, user_id, pack_type, count) VALUES (?, ?, ?, ?) ON CONFLICT(guild_id, user_id, pack_type) DO UPDATE SET count = count + ?',
-                                      (guild_id, user.id, sender_key, sender_amount, sender_amount))
-
-                        # Execute trade for receiver (remove from receiver, add to sender)
-                        if receiver_type == 'dragon':
-                            await add_dragons(guild_id, user.id, receiver_key, -receiver_amount)
-                            await add_dragons(guild_id, interaction.user.id, receiver_key, receiver_amount)
-                        elif receiver_type == 'lucky_charm':
-                            c.execute('UPDATE user_luckycharms SET count = count - ? WHERE guild_id = ? AND user_id = ?',
-                                      (receiver_amount, guild_id, user.id))
-                            c.execute('INSERT INTO user_luckycharms (guild_id, user_id, count) VALUES (?, ?, ?) ON CONFLICT(guild_id, user_id) DO UPDATE SET count = count + ?',
-                                      (guild_id, interaction.user.id, receiver_amount, receiver_amount))
-                        elif receiver_type == 'dragonscale':
-                            c.execute('UPDATE dragonscales SET minutes = minutes - ? WHERE guild_id = ? AND user_id = ?',
-                                      (receiver_amount, guild_id, user.id))
-                            c.execute('INSERT INTO dragonscales (guild_id, user_id, minutes) VALUES (?, ?, ?) ON CONFLICT(guild_id, user_id) DO UPDATE SET minutes = minutes + ?',
-                                      (guild_id, interaction.user.id, receiver_amount, receiver_amount))
-                        elif receiver_type == 'dna':
-                            c.execute('UPDATE user_items SET count = count - ? WHERE guild_id = ? AND user_id = ? AND item_type = ?',
-                                      (receiver_amount, guild_id, user.id, 'dna'))
-                            c.execute('INSERT INTO user_items (guild_id, user_id, item_type, count) VALUES (?, ?, ?, ?) ON CONFLICT(guild_id, user_id, item_type) DO UPDATE SET count = count + ?',
-                                      (guild_id, interaction.user.id, 'dna', receiver_amount, receiver_amount))
-                        elif receiver_type == 'lucky_dice':
-                            c.execute('UPDATE user_items SET count = count - ? WHERE guild_id = ? AND user_id = ? AND item_type = ?',
-                                      (receiver_amount, guild_id, user.id, 'lucky_dice'))
-                            c.execute('INSERT INTO user_items (guild_id, user_id, item_type, count) VALUES (?, ?, ?, ?) ON CONFLICT(guild_id, user_id, item_type) DO UPDATE SET count = count + ?',
-                                      (guild_id, interaction.user.id, 'lucky_dice', receiver_amount, receiver_amount))
-                        elif receiver_type == 'night_vision':
-                            c.execute('UPDATE user_items SET count = count - ? WHERE guild_id = ? AND user_id = ? AND item_type = ?',
-                                      (receiver_amount, guild_id, user.id, 'night_vision'))
-                            c.execute('INSERT INTO user_items (guild_id, user_id, item_type, count) VALUES (?, ?, ?, ?) ON CONFLICT(guild_id, user_id, item_type) DO UPDATE SET count = count + ?',
-                                      (guild_id, interaction.user.id, 'night_vision', receiver_amount, receiver_amount))
-                        elif receiver_type == 'pack':
-                            c.execute('UPDATE user_packs SET count = count - ? WHERE guild_id = ? AND user_id = ? AND pack_type = ?',
-                                      (receiver_amount, guild_id, user.id, receiver_key))
-                            c.execute('INSERT INTO user_packs (guild_id, user_id, pack_type, count) VALUES (?, ?, ?, ?) ON CONFLICT(guild_id, user_id, pack_type) DO UPDATE SET count = count + ?',
-                                      (guild_id, interaction.user.id, receiver_key, receiver_amount, receiver_amount))
-
-                        c.execute('UPDATE trade_offers SET status = "completed" WHERE trade_id = ?', (trade_id,))
-                        conn.commit()
-
-                        # Dragonpass quest: complete_trade (both parties)
-                        for _uid in (interaction.user.id, user.id):
-                            _qr = await asyncio.to_thread(check_dragonpass_quests, guild_id, _uid, 'complete_trade')
-                            if _qr and _qr[3]:
-                                await send_quest_notification(interaction.client, guild_id, _uid, _qr[3])
-
-                        # Get display names
-                        your_emoji = your_item_data['emoji']
-                        your_name = your_item_data['name']
-                        their_emoji = their_item_data['emoji']
-                        their_name = their_item_data['name']
-
-                        await accept_inter.response.edit_message(
-                            content=f"✅ **Trade Completed!**\n\n"
-                                   f"{interaction.user.mention} gave {sender_amount}x {your_emoji} {your_name}\n"
-                                   f"{user.mention} gave {receiver_amount}x {their_emoji} {their_name}",
-                            view=None
-                        )
-                    except Exception as e:
-                        await accept_inter.response.send_message(f"❌ Trade failed: {e}", ephemeral=False)
-                    finally:
-                        conn.close()
-
-                @discord.ui.button(label="❌ Decline", style=discord.ButtonStyle.red)
-                async def decline_button(self, decline_inter: discord.Interaction, button: discord.ui.Button):
-                    if decline_inter.user.id != user.id:
-                        await decline_inter.response.send_message("❌ You can't decline this trade!", ephemeral=False)
-                        return
-
-                    conn = get_db_connection()
-                    c = conn.cursor()
-                    c.execute('UPDATE trade_offers SET status = "declined" WHERE trade_id = ?', (trade_id,))
+                    if s_item['type'] != 'dragon':
+                        _transfer(s_item['type'], s_item['key'], interaction.user.id, user.id, s_amount)
+                    if r_item['type'] != 'dragon':
+                        _transfer(r_item['type'], r_item['key'], user.id, interaction.user.id, r_amount)
                     conn.commit()
+                finally:
                     conn.close()
 
-                    await decline_inter.response.edit_message(
-                        content=f"❌ Trade declined",
-                        view=None
+            try:
+                await asyncio.to_thread(_do_db)
+                if s_item['type'] == 'dragon':
+                    await add_dragons(guild_id, interaction.user.id, s_item['key'], -s_amount)
+                    await add_dragons(guild_id, user.id, s_item['key'], s_amount)
+                if r_item['type'] == 'dragon':
+                    await add_dragons(guild_id, user.id, r_item['key'], -r_amount)
+                    await add_dragons(guild_id, interaction.user.id, r_item['key'], r_amount)
+
+                for _uid in (interaction.user.id, user.id):
+                    _qr = await asyncio.to_thread(check_dragonpass_quests, guild_id, _uid, 'complete_trade')
+                    if _qr and _qr[3]:
+                        await send_quest_notification(acc_inter.client, guild_id, _uid, _qr[3])
+
+                await acc_inter.response.edit_message(
+                    content=f"✅ **Trade Completed!**\n{interaction.user.mention} gave **{s_amount}×** {s_item['emoji']} {s_item['name']} → {user.mention}\n{user.mention} gave **{r_amount}×** {r_item['emoji']} {r_item['name']} → {interaction.user.mention}",
+                    embed=None, view=None
+                )
+            except Exception as e:
+                try:
+                    await acc_inter.response.send_message(f"❌ Trade failed: {e}", ephemeral=False)
+                except Exception:
+                    pass
+
+        # ── Step 3: A confirms the final deal ──────────────────────────
+        def _make_confirm_view(s_item, s_amount, r_item, r_amount):
+            class TradeConfirmView(discord.ui.View):
+                def __init__(self):
+                    super().__init__(timeout=180)
+                    self.done = False
+
+                @discord.ui.button(label="✅ Confirm Trade", style=discord.ButtonStyle.green)
+                async def confirm_btn(self, conf_inter: discord.Interaction, button: discord.ui.Button):
+                    if conf_inter.user.id != interaction.user.id:
+                        await conf_inter.response.send_message("❌ Only the trade initiator can confirm!", ephemeral=True)
+                        return
+                    if self.done:
+                        await conf_inter.response.send_message("❌ Already processed.", ephemeral=True)
+                        return
+                    self.done = True
+                    self.stop()
+                    await _execute_trade(conf_inter, s_item, s_amount, r_item, r_amount)
+
+                @discord.ui.button(label="❌ Cancel", style=discord.ButtonStyle.red)
+                async def cancel_btn(self, cancel_inter: discord.Interaction, button: discord.ui.Button):
+                    if cancel_inter.user.id != interaction.user.id:
+                        await cancel_inter.response.send_message("❌ Only the trade initiator can cancel!", ephemeral=True)
+                        return
+                    self.done = True
+                    self.stop()
+                    await cancel_inter.response.edit_message(content="❌ Trade cancelled.", embed=None, view=None)
+
+            return TradeConfirmView()
+
+        # ── Step 2: B selects their offer + amount + submits ───────────
+        def _make_receiver_view(s_item, s_amount):
+            class ReceiverItemView(discord.ui.View):
+                def __init__(self):
+                    super().__init__(timeout=300)
+                    opts = _build_item_options(their_items, "r_")
+                    sel = discord.ui.Select(placeholder="What will you offer in return?", options=opts, min_values=1, max_values=1)
+                    sel.callback = self.item_selected
+                    self.add_item(sel)
+                    self.r_item = None
+
+                async def item_selected(self, inter3: discord.Interaction):
+                    if inter3.user.id != user.id:
+                        await inter3.response.send_message("❌ Only the trade recipient can respond!", ephemeral=True)
+                        return
+                    val = inter3.data['values'][0]
+                    itype, ikey = _parse_item_val(val, "r_")
+                    r_item = _find_item(their_items, itype, ikey)
+                    if not r_item:
+                        await inter3.response.send_message("❌ Item not found!", ephemeral=True)
+                        return
+                    self.r_item = r_item
+                    max_amt = min(r_item['count'], 10)
+                    amt_opts = [discord.SelectOption(label=str(i), value=str(i)) for i in range(1, max_amt + 1)]
+
+                    class ReceiverAmountView(discord.ui.View):
+                        def __init__(self_):
+                            super().__init__(timeout=300)
+                            sel2 = discord.ui.Select(placeholder="How many?", options=amt_opts, min_values=1, max_values=1)
+                            sel2.callback = self_.amount_selected
+                            self_.add_item(sel2)
+
+                        async def amount_selected(self_, inter4: discord.Interaction):
+                            if inter4.user.id != user.id:
+                                await inter4.response.send_message("❌ Only the trade recipient can respond!", ephemeral=True)
+                                return
+                            r_amount = int(inter4.data['values'][0])
+                            confirm_embed = discord.Embed(
+                                title="🤝 Trade Proposal",
+                                description=f"{user.mention} has made an offer! {interaction.user.mention}, do you accept?",
+                                color=discord.Color.gold()
+                            )
+                            confirm_embed.add_field(name=f"{interaction.user.display_name} gives", value=f"**{s_amount}×** {s_item['emoji']} {s_item['name']}", inline=True)
+                            confirm_embed.add_field(name=f"{user.display_name} gives", value=f"**{r_amount}×** {r_item['emoji']} {r_item['name']}", inline=True)
+                            confirm_embed.set_footer(text="Expires in 3 minutes")
+                            await inter4.response.send_message(
+                                content=interaction.user.mention,
+                                embed=confirm_embed,
+                                view=_make_confirm_view(s_item, s_amount, r_item, r_amount)
+                            )
+
+                    amt_embed = discord.Embed(
+                        title="📦 How many?",
+                        description=f"You have **{r_item['count']}** {r_item['emoji']} {r_item['name']}",
+                        color=discord.Color.blue()
+                    )
+                    await inter3.response.send_message(embed=amt_embed, view=ReceiverAmountView(), ephemeral=False)
+
+                @discord.ui.button(label="❌ Decline", style=discord.ButtonStyle.red, row=1)
+                async def decline_btn(self, dec_inter: discord.Interaction, button: discord.ui.Button):
+                    if dec_inter.user.id != user.id:
+                        await dec_inter.response.send_message("❌ Only the trade recipient can decline!", ephemeral=True)
+                        return
+                    self.stop()
+                    await dec_inter.response.edit_message(
+                        content=f"❌ {user.display_name} declined the trade.",
+                        embed=None, view=None
                     )
 
-            embed = discord.Embed(
-                title="🤝 Trade Offer",
-                description=f"{interaction.user.mention} wants to trade with {user.mention}!",
-                color=discord.Color.blue()
-            )
-            embed.add_field(
-                name=f"{interaction.user.display_name} Offers",
-                value=f"{your_amount}x {your_item_data['emoji']} {your_item_data['name']}",
-                inline=True
-            )
-            embed.add_field(
-                name=f"{user.display_name} Offers",
-                value=f"{their_amount}x {their_item_data['emoji']} {their_item_data['name']}",
-                inline=True
-            )
-            embed.set_footer(text="Trade expires in 5 minutes")
+            return ReceiverItemView()
 
-            view = FinalTradeView()
-            await init_inter.followup.send(content=user.mention, embed=embed, view=view, ephemeral=False)
+        # ── Step 1: A selects their item ────────────────────────────────
+        class SenderItemView(discord.ui.View):
+            def __init__(self):
+                super().__init__(timeout=300)
+                opts = _build_item_options(your_items, "s_")
+                sel = discord.ui.Select(placeholder="What do you want to offer?", options=opts, min_values=1, max_values=1)
+                sel.callback = self.item_selected
+                self.add_item(sel)
 
-        embed = discord.Embed(
+            async def item_selected(self, inter1: discord.Interaction):
+                if inter1.user.id != interaction.user.id:
+                    await inter1.response.send_message("❌ This is not your trade!", ephemeral=True)
+                    return
+                val = inter1.data['values'][0]
+                itype, ikey = _parse_item_val(val, "s_")
+                s_item = _find_item(your_items, itype, ikey)
+                if not s_item:
+                    await inter1.response.send_message("❌ Item not found!", ephemeral=True)
+                    return
+                max_amt = min(s_item['count'], 10)
+                amt_opts = [discord.SelectOption(label=str(i), value=str(i)) for i in range(1, max_amt + 1)]
+
+                class SenderAmountView(discord.ui.View):
+                    def __init__(self_):
+                        super().__init__(timeout=300)
+                        sel2 = discord.ui.Select(placeholder="How many?", options=amt_opts, min_values=1, max_values=1)
+                        sel2.callback = self_.amount_selected
+                        self_.add_item(sel2)
+
+                    async def amount_selected(self_, inter2: discord.Interaction):
+                        if inter2.user.id != interaction.user.id:
+                            await inter2.response.send_message("❌ This is not your trade!", ephemeral=True)
+                            return
+                        s_amount = int(inter2.data['values'][0])
+                        offer_embed = discord.Embed(
+                            title="🤝 Trade Request",
+                            description=f"{interaction.user.mention} wants to trade with you, {user.mention}!",
+                            color=discord.Color.blue()
+                        )
+                        offer_embed.add_field(name=f"{interaction.user.display_name} offers", value=f"**{s_amount}×** {s_item['emoji']} {s_item['name']}", inline=False)
+                        offer_embed.add_field(name="Your response", value="Select what you want to offer in return:", inline=False)
+                        offer_embed.set_footer(text="Expires in 5 minutes")
+                        await inter2.response.send_message(
+                            content=user.mention,
+                            embed=offer_embed,
+                            view=_make_receiver_view(s_item, s_amount)
+                        )
+
+                amt_embed = discord.Embed(
+                    title="📦 How many?",
+                    description=f"You have **{s_item['count']}** {s_item['emoji']} {s_item['name']}",
+                    color=discord.Color.blue()
+                )
+                await inter1.response.send_message(embed=amt_embed, view=SenderAmountView(), ephemeral=False)
+
+        setup_embed = discord.Embed(
             title="🤝 Trade Setup",
-            description=f"Start your trade with {user.mention}",
+            description=f"Select what you want to offer {user.mention}",
             color=discord.Color.blue()
         )
-
-        view = TradeSetupView(your_items, their_items)
-        await interaction.followup.send(embed=embed, view=view, ephemeral=False)
+        await interaction.followup.send(embed=setup_embed, view=SenderItemView(), ephemeral=False)
 
     @app_commands.command(name="gift", description="Gift dragons to another user")
     @app_commands.describe(user="User to gift dragons to")

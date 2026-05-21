@@ -1463,8 +1463,12 @@ class EventsCog(commands.Cog):
                             if _get_active_item(guild_id, message.author.id, 'gold_rush'):
                                 coins_earned = int(coins_earned * 1.5)
     
-                            await update_balance_and_check_trophies(self.bot, guild_id, message.author.id, coins_earned)
-    
+                            try:
+                                await update_balance_and_check_trophies(self.bot, guild_id, message.author.id, coins_earned)
+                            except Exception as _bal_err:
+                                logger.error(f"[catch] update_balance failed (non-fatal): {_bal_err}")
+                                coins_earned = 0
+
                             # Track dragonfest catches if active
                             dragonfest_data = active_dragonfest.get(guild_id)
                             if dragonfest_data and (isinstance(dragonfest_data, dict) and dragonfest_data['end'] > current_time or isinstance(dragonfest_data, int) and dragonfest_data > current_time):
