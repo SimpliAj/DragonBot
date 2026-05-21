@@ -572,17 +572,19 @@ def get_higher_rarity_dragon(min_value: float = 0):
 def get_user_perks(guild_id: int, user_id: int):
     """Get all active perks for a user (only non-expired ones)."""
     conn = get_db_connection()
-    c = conn.cursor()
-    current_time = int(time.time())
+    try:
+        c = conn.cursor()
+        current_time = int(time.time())
 
-    c.execute('SELECT * FROM active_perks WHERE guild_id = ? AND user_id = ? AND expires_at > ?',
-              (guild_id, user_id, current_time))
-    perks = c.fetchall()
+        c.execute('SELECT * FROM active_perks WHERE guild_id = ? AND user_id = ? AND expires_at > ?',
+                  (guild_id, user_id, current_time))
+        perks = c.fetchall()
 
-    c.execute('DELETE FROM active_perks WHERE expires_at <= ?', (current_time,))
-    conn.commit()
-    conn.close()
-    return perks
+        c.execute('DELETE FROM active_perks WHERE expires_at <= ?', (current_time,))
+        conn.commit()
+        return perks
+    finally:
+        conn.close()
 
 
 def apply_perks(guild_id: int, user_id: int, base_amount: int, dragon_type: str):

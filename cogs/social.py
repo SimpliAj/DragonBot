@@ -168,83 +168,84 @@ class SocialCog(commands.Cog):
         user_id = interaction.user.id
 
         conn = get_db_connection()
-        c = conn.cursor()
+        try:
+            c = conn.cursor()
 
-        current_time = int(time.time())
-        c.execute('''SELECT card_data, marked_positions, created_at, expires_at, completed
-                     FROM bingo_cards WHERE guild_id = ? AND user_id = ?''',
-                  (guild_id, user_id))
-        existing_card = c.fetchone()
+            current_time = int(time.time())
+            c.execute('''SELECT card_data, marked_positions, created_at, expires_at, completed
+                         FROM bingo_cards WHERE guild_id = ? AND user_id = ?''',
+                      (guild_id, user_id))
+            existing_card = c.fetchone()
 
-        if existing_card:
-            card_data, marked_str, created_at, expires_at, completed = existing_card
+            if existing_card:
+                card_data, marked_str, created_at, expires_at, completed = existing_card
 
-            if current_time > expires_at:
-                c.execute('DELETE FROM bingo_cards WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
+                if current_time > expires_at:
+                    c.execute('DELETE FROM bingo_cards WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
+                    conn.commit()
+                    existing_card = None
+                elif completed:
+                    time_remaining = expires_at - current_time
+                    time_str = format_time_remaining(time_remaining)
+                    conn.close()
+                    await interaction.followup.send(f"✅ You already completed this bingo card! It will expire in **{time_str}** and you can start a new one.", ephemeral=False)
+                    return
+
+            if not existing_card:
+                weighted_dragons = []
+                for dragon, data in DRAGON_TYPES.items():
+                    rarity = next((r for r, dragons in DRAGON_RARITY_TIERS.items() if dragon in dragons), 'common')
+                    weight = {'common': 40, 'uncommon': 25, 'rare': 15, 'epic': 10, 'legendary': 6, 'mythic': 3, 'ultra': 1}
+                    weighted_dragons.extend([dragon] * weight.get(rarity, 10))
+
+                card = []
+                for i in range(25):
+                    if i == 12:
+                        card.append('FREE')
+                    else:
+                        card.append(random.choice(weighted_dragons))
+
+                card_data = ','.join(card)
+                marked_positions = '[]'
+                created_at = current_time
+                expires_at = current_time + (48 * 60 * 60)
+
+                c.execute('''INSERT OR REPLACE INTO bingo_cards
+                             (guild_id, user_id, card_data, marked_positions, created_at, expires_at)
+                             VALUES (?, ?, ?, ?, ?, ?)''',
+                          (guild_id, user_id, card_data, marked_positions, created_at, expires_at))
                 conn.commit()
-                existing_card = None
-            elif completed:
-                conn.close()
-                time_remaining = expires_at - current_time
-                time_str = format_time_remaining(time_remaining)
-                await interaction.followup.send(f"✅ You already completed this bingo card! It will expire in **{time_str}** and you can start a new one.", ephemeral=False)
-                return
+                marked_str = marked_positions
+            else:
+                card_data, marked_str, created_at, expires_at, completed = existing_card
 
-        if not existing_card:
-            weighted_dragons = []
-            for dragon, data in DRAGON_TYPES.items():
-                rarity = next((r for r, dragons in DRAGON_RARITY_TIERS.items() if dragon in dragons), 'common')
-                weight = {'common': 40, 'uncommon': 25, 'rare': 15, 'epic': 10, 'legendary': 6, 'mythic': 3, 'ultra': 1}
-                weighted_dragons.extend([dragon] * weight.get(rarity, 10))
+            card = card_data.split(',')
+            marked = safe_json_loads(marked_str, [])
 
-            card = []
-            for i in range(25):
-                if i == 12:
-                    card.append('FREE')
-                else:
-                    card.append(random.choice(weighted_dragons))
+            if 12 not in marked:
+                marked.append(12)
+                c.execute('UPDATE bingo_cards SET marked_positions = ? WHERE guild_id = ? AND user_id = ?',
+                          (str(marked), guild_id, user_id))
+                conn.commit()
 
-            card_data = ','.join(card)
-            marked_positions = '[]'
-            created_at = current_time
-            expires_at = current_time + (48 * 60 * 60)
+            def check_bingo(marked_positions, card_size=5):
+                lines = []
+                for row in range(card_size):
+                    lines.append([row * card_size + col for col in range(card_size)])
+                for col in range(card_size):
+                    lines.append([row * card_size + col for row in range(card_size)])
+                lines.append([i * card_size + i for i in range(card_size)])
+                lines.append([i * card_size + (card_size - 1 - i) for i in range(card_size)])
+                for line in lines:
+                    if all(pos in marked_positions for pos in line):
+                        return True, line
+                return False, []
 
-            c.execute('''INSERT OR REPLACE INTO bingo_cards
-                         (guild_id, user_id, card_data, marked_positions, created_at, expires_at)
-                         VALUES (?, ?, ?, ?, ?, ?)''',
-                      (guild_id, user_id, card_data, marked_positions, created_at, expires_at))
-            conn.commit()
-            marked_str = marked_positions
-        else:
-            card_data, marked_str, created_at, expires_at, completed = existing_card
+            has_bingo, bingo_line = check_bingo(marked)
 
-        card = card_data.split(',')
-        marked = safe_json_loads(marked_str, [])
-
-        if 12 not in marked:
-            marked.append(12)
-            c.execute('UPDATE bingo_cards SET marked_positions = ? WHERE guild_id = ? AND user_id = ?',
-                      (str(marked), guild_id, user_id))
-            conn.commit()
-
-        def check_bingo(marked_positions, card_size=5):
-            lines = []
-            for row in range(card_size):
-                lines.append([row * card_size + col for col in range(card_size)])
-            for col in range(card_size):
-                lines.append([row * card_size + col for row in range(card_size)])
-            lines.append([i * card_size + i for i in range(card_size)])
-            lines.append([i * card_size + (card_size - 1 - i) for i in range(card_size)])
-            for line in lines:
-                if all(pos in marked_positions for pos in line):
-                    return True, line
-            return False, []
-
-        has_bingo, bingo_line = check_bingo(marked)
-
-        completed_before = existing_card[4] if existing_card else False
-
-        conn.close()
+            completed_before = existing_card[4] if existing_card else False
+        finally:
+            conn.close()
 
         _qr = await asyncio.to_thread(check_dragonpass_quests, guild_id, user_id, 'check_bingo', 1)
         if _qr and _qr[3]:
