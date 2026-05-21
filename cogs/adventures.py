@@ -129,7 +129,7 @@ class AdventuresCog(commands.Cog):
             embed.add_field(
                 name="Potential Rewards (on success)",
                 value=f"💰 {adventure_config['rewards']['coins'][0]:,} - {adventure_config['rewards']['coins'][1]:,} coins\n"
-                     f"🐉 {int(adventure_config['rewards']['dragon_chance'] * 100)}% chance to find a dragon\n"
+                     f"🐉 {adventure_config['rewards']['dragon_count'][0]}-{adventure_config['rewards']['dragon_count'][1]} dragon(s)\n"
                      f"📦 {int(adventure_config['rewards']['item_chance'] * 100)}% chance to find an item",
                 inline=False
             )
@@ -267,8 +267,8 @@ class AdventuresCog(commands.Cog):
                     result_embed.add_field(
                         name="Potential Rewards (on success)",
                         value=f"💰 {adventure_config['rewards']['coins'][0]:,} - {adventure_config['rewards']['coins'][1]:,} coins\n"
-                             f"🐉 {int(adventure_config['rewards']['dragon_chance'] * 100)}% chance to find a dragon\n"
-                             f"📦 {int(adventure_config['rewards']['item_chance'] * 100)}% chance to find an item" + 
+                             f"🐉 {adventure_config['rewards']['dragon_count'][0]}-{adventure_config['rewards']['dragon_count'][1]} dragon(s)\n"
+                             f"📦 {int(adventure_config['rewards']['item_chance'] * 100)}% chance to find an item" +
                              (f" **(x2 with Double Loot)**" if use_double else ""),
                         inline=False
                     )
@@ -326,7 +326,7 @@ class AdventuresCog(commands.Cog):
             embed.add_field(
                 name="Potential Rewards (on success)",
                 value=f"💰 {adventure_config['rewards']['coins'][0]:,} - {adventure_config['rewards']['coins'][1]:,} coins\n"
-                     f"🐉 {int(adventure_config['rewards']['dragon_chance'] * 100)}% chance to find a dragon\n"
+                     f"🐉 {adventure_config['rewards']['dragon_count'][0]}-{adventure_config['rewards']['dragon_count'][1]} dragon(s)\n"
                      f"📦 {int(adventure_config['rewards']['item_chance'] * 100)}% chance to find an item",
                 inline=False
             )
