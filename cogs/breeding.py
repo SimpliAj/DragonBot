@@ -15,7 +15,7 @@ from typing import Optional
 from config import *
 from state import *
 import database
-from database import is_player_softlocked, update_balance
+from database import get_db_connection, is_player_softlocked, update_balance
 from utils import *
 from achievements import award_trophy
 
@@ -29,7 +29,7 @@ class BreedingCog(commands.Cog):
         """Cross-breeding system - combine 2 dragons for higher rarity offspring"""
         await interaction.response.defer(ephemeral=False)
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         try:
             c = conn.cursor()
 
@@ -474,7 +474,7 @@ class BreedingCog(commands.Cog):
         await interaction.response.defer(ephemeral=False)
 
         # Get user's dragons
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute('''SELECT dragon_type, count FROM user_dragons
                      WHERE guild_id = ? AND user_id = ? AND count > 0
@@ -725,7 +725,7 @@ class BreedingCog(commands.Cog):
         await interaction.response.defer(ephemeral=False)
 
         if action == "view":
-            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+            conn = get_db_connection()
             c = conn.cursor()
 
             c.execute('''SELECT queue_id, parent1_type, parent2_type, scheduled_for, created_at
@@ -759,7 +759,7 @@ class BreedingCog(commands.Cog):
             max_slots = get_breeding_queue_slots(breeding_info['level'])
 
             # Get user's current cooldown status
-            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+            conn = get_db_connection()
             c = conn.cursor()
             c.execute('SELECT last_breed, last_breed_rarity FROM breeding_cooldowns WHERE guild_id = ? AND user_id = ?',
                       (interaction.guild_id, interaction.user.id))
@@ -807,7 +807,7 @@ class BreedingCog(commands.Cog):
             return
 
         if action == "cancel":
-            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+            conn = get_db_connection()
             c = conn.cursor()
 
             c.execute('''SELECT queue_id, parent1_type, parent2_type FROM breeding_queue
@@ -823,7 +823,7 @@ class BreedingCog(commands.Cog):
 
             if len(queued) == 1:
                 # Only one item, cancel it directly
-                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                conn = get_db_connection()
                 c = conn.cursor()
                 c.execute('DELETE FROM breeding_queue WHERE queue_id = ?', (queued[0][0],))
                 conn.commit()
@@ -873,7 +873,7 @@ class BreedingCog(commands.Cog):
                         await inter.followup.send("❌ Please select a valid queue item!", ephemeral=True)
                         return
 
-                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                    conn = get_db_connection()
                     c = conn.cursor()
                     c.execute('DELETE FROM breeding_queue WHERE queue_id = ?', (queue_id,))
                     conn.commit()
@@ -892,7 +892,7 @@ class BreedingCog(commands.Cog):
 
         if action == "schedule":
             # Get user's dragons
-            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+            conn = get_db_connection()
             c = conn.cursor()
             c.execute('''SELECT dragon_type, count FROM user_dragons
                          WHERE guild_id = ? AND user_id = ? AND count > 0
@@ -1011,7 +1011,7 @@ class BreedingCog(commands.Cog):
                                 return
 
                             # Check queue limit based on breeding level
-                            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                            conn = get_db_connection()
                             c = conn.cursor()
 
                             # Get breeding level

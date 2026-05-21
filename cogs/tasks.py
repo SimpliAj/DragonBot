@@ -501,9 +501,11 @@ class TasksCog(commands.Cog):
                     del active_spawns[guild_id]
                     try:
                         _c = get_db_connection()
-                        _c.execute('DELETE FROM active_dragon_spawns WHERE guild_id = ?', (guild_id,))
-                        _c.commit()
-                        _c.close()
+                        try:
+                            _c.execute('DELETE FROM active_dragon_spawns WHERE guild_id = ?', (guild_id,))
+                            _c.commit()
+                        finally:
+                            _c.close()
                     except Exception:
                         pass
                 else:
@@ -518,84 +520,84 @@ class TasksCog(commands.Cog):
             if not channel:
                 continue
 
-            # Get last spawn time
-            conn = None
+            # Read spawn config — close connection BEFORE any async Discord calls
+            current_time = int(time.time())
+            last_spawn_time = current_time
+            should_spawn = False
             try:
                 conn = get_db_connection()
-                c = conn.cursor()
-                # Check spawn_config for last_spawn_time (backward compatibility)
-                c.execute('SELECT last_spawn_time FROM spawn_config WHERE guild_id = ?', (guild_id,))
-                result = c.fetchone()
-
-                current_time = int(time.time())
-
-                # If no spawn_config exists for this guild, create one with current time
-                if not result:
-                    c.execute('INSERT OR IGNORE INTO spawn_config (guild_id, spawn_channel_id, last_spawn_time) VALUES (?, ?, ?)',
-                              (guild_id, None, current_time))
-                    conn.commit()
-                    last_spawn_time = current_time
-                else:
-                    last_spawn_time = result[0]
-                    # If last_spawn_time is 0 (old data), set it to current time
-                    if last_spawn_time == 0 or last_spawn_time is None:
+                try:
+                    c = conn.cursor()
+                    c.execute('SELECT last_spawn_time FROM spawn_config WHERE guild_id = ?', (guild_id,))
+                    result = c.fetchone()
+                    if not result:
+                        c.execute('INSERT OR IGNORE INTO spawn_config (guild_id, spawn_channel_id, last_spawn_time) VALUES (?, ?, ?)',
+                                  (guild_id, None, current_time))
+                        conn.commit()
                         last_spawn_time = current_time
-                        c.execute('UPDATE spawn_config SET last_spawn_time = ? WHERE guild_id = ?',
-                                  (current_time, guild_id))
-                        conn.commit()
-
-                # Check if dragonscale/dragonfest/premium is active (shorter interval: 30-90 seconds)
-                has_active_dragonscale = guild_id in active_dragonscales and active_dragonscales[guild_id] > current_time
-
-                # Check dragonfest - handle both old int format and new dict format
-                has_dragonfest = False
-                if guild_id in active_dragonfest:
-                    dragonfest_data = active_dragonfest[guild_id]
-                    dragonfest_end_time = dragonfest_data['end'] if isinstance(dragonfest_data, dict) else dragonfest_data
-                    has_dragonfest = dragonfest_end_time > current_time
-
-                has_premium = guild_id in premium_users and any(end_time > current_time for end_time in premium_users[guild_id].values())
-
-                if has_active_dragonscale or has_dragonfest or has_premium:
-                    # During events: INSTANT spawns (max 2-5 seconds after any spawn)
-                    spawn_interval = random.randint(2, 5)  # 2-5 seconds during events
-                else:
-                    # Normal mode: 3-15 minutes
-                    spawn_interval = random.randint(180, 900)  # 3-15 minutes normal
-
-                # Spawn if enough time has passed
-                if current_time - last_spawn_time >= spawn_interval:
-                    try:
-                        from cogs.events import spawn_dragon
-                        await spawn_dragon(guild_id, channel, self.bot)
-                        c.execute('UPDATE spawn_config SET last_spawn_time = ? WHERE guild_id = ?',
-                                  (current_time, guild_id))
-                        conn.commit()
-                    except discord.Forbidden:
-                        # Bot missing permissions in this channel/guild
-                        try:
-                            owner = await self.bot.fetch_user(guild.owner_id)
-                            embed = discord.Embed(
-                                title="⚠️ Missing Permissions",
-                                description=f"**Dragon Bot** is missing permissions in **{guild.name}**!\n\n"
-                                            f"The bot needs the following permissions:\n"
-                                            f"• Send Messages\n"
-                                            f"• Embed Links\n"
-                                            f"• Add Reactions\n\n"
-                                            f"Please update the bot's role permissions or Dragon spawning will stop working.",
-                                color=discord.Color.red()
-                            )
-                            embed.set_footer(text="Configure permissions in Server Settings → Roles")
-                            await owner.send(embed=embed)
-                        except:
-                            pass  # Silently fail if we can't send DM
-                    except Exception as e:
-                        print(f"Error spawning dragon in guild {guild_id}: {e}")
+                    else:
+                        last_spawn_time = result[0]
+                        if last_spawn_time == 0 or last_spawn_time is None:
+                            last_spawn_time = current_time
+                            c.execute('UPDATE spawn_config SET last_spawn_time = ? WHERE guild_id = ?',
+                                      (current_time, guild_id))
+                            conn.commit()
+                finally:
+                    conn.close()
             except sqlite3.OperationalError as e:
                 print(f"Database error in auto_spawn_dragons for guild {guild_id}: {e}")
-            finally:
-                if conn:
-                    conn.close()
+                continue
+
+            has_active_dragonscale = guild_id in active_dragonscales and active_dragonscales[guild_id] > current_time
+            has_dragonfest = False
+            if guild_id in active_dragonfest:
+                dragonfest_data = active_dragonfest[guild_id]
+                dragonfest_end_time = dragonfest_data['end'] if isinstance(dragonfest_data, dict) else dragonfest_data
+                has_dragonfest = dragonfest_end_time > current_time
+            has_premium = guild_id in premium_users and any(end_time > current_time for end_time in premium_users[guild_id].values())
+
+            if has_active_dragonscale or has_dragonfest or has_premium:
+                spawn_interval = random.randint(2, 5)
+            else:
+                spawn_interval = random.randint(180, 900)
+
+            if current_time - last_spawn_time < spawn_interval:
+                continue
+
+            # Spawn — no DB connection held during Discord API calls
+            try:
+                from cogs.events import spawn_dragon
+                await spawn_dragon(guild_id, channel, self.bot)
+                # Update last_spawn_time after spawn completes
+                try:
+                    conn = get_db_connection()
+                    try:
+                        conn.execute('UPDATE spawn_config SET last_spawn_time = ? WHERE guild_id = ?',
+                                     (current_time, guild_id))
+                        conn.commit()
+                    finally:
+                        conn.close()
+                except sqlite3.OperationalError as e:
+                    print(f"Database error updating spawn time for guild {guild_id}: {e}")
+            except discord.Forbidden:
+                try:
+                    owner = await self.bot.fetch_user(guild.owner_id)
+                    embed = discord.Embed(
+                        title="⚠️ Missing Permissions",
+                        description=f"**Dragon Bot** is missing permissions in **{guild.name}**!\n\n"
+                                    f"The bot needs the following permissions:\n"
+                                    f"• Send Messages\n"
+                                    f"• Embed Links\n"
+                                    f"• Add Reactions\n\n"
+                                    f"Please update the bot's role permissions or Dragon spawning will stop working.",
+                        color=discord.Color.red()
+                    )
+                    embed.set_footer(text="Configure permissions in Server Settings → Roles")
+                    await owner.send(embed=embed)
+                except:
+                    pass
+            except Exception as e:
+                print(f"Error spawning dragon in guild {guild_id}: {e}")
 
     @auto_spawn_dragons.error
     async def on_auto_spawn_dragons_error(self, error):
@@ -1261,7 +1263,7 @@ class TasksCog(commands.Cog):
                                         )
                                         return
 
-                                    # Process purchase
+                                    # Process purchase — commit all DB writes before any awaits
                                     conn = get_db_connection()
                                     c = conn.cursor()
 
@@ -1270,9 +1272,6 @@ class TasksCog(commands.Cog):
                                               (price, gid, select_interaction.user.id))
 
                                     if market_item['is_dragon']:
-                                        # Add dragon
-                                        from utils import add_dragons
-                                        await add_dragons(gid, select_interaction.user.id, item_key, 1)
                                         item_name = f"{item_info['emoji']} {item_info['name']} Dragon"
                                     else:
                                         # Add item based on type
@@ -1310,6 +1309,10 @@ class TasksCog(commands.Cog):
 
                                     conn.commit()
                                     conn.close()
+
+                                    if market_item['is_dragon']:
+                                        from utils import add_dragons
+                                        await add_dragons(gid, select_interaction.user.id, item_key, 1)
 
                                     # Reduce stock
                                     market_item['stock'] -= 1
@@ -1570,6 +1573,7 @@ class TasksCog(commands.Cog):
                     c.execute('UPDATE user_dragons SET count = count - 1 WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
                              (guild_id, user_id, consumed))
                     c.execute('UPDATE breeding_queue SET status = "completed_fail" WHERE queue_id = ?', (queue_id,))
+                    conn.commit()  # commit before async Discord calls
 
                     # Send notification to user and channel
                     try:
@@ -1643,6 +1647,7 @@ class TasksCog(commands.Cog):
                     c.execute('UPDATE user_dragons SET count = count + 1 WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
                              (guild_id, user_id, offspring))
                     c.execute('UPDATE breeding_queue SET status = "completed_success" WHERE queue_id = ?', (queue_id,))
+                    conn.commit()  # commit before async Discord calls
 
                     # Send notification to user and channel
                     try:

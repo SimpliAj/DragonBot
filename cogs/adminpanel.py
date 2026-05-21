@@ -28,6 +28,7 @@ from cogs.devpanel import (
     _PACK_OPTIONS,
     _MINUTES_OPTIONS,
 )
+from database import get_db_connection
 
 
 def _is_admin(interaction: discord.Interaction) -> bool:
@@ -176,7 +177,7 @@ class AdminGiveDragonscaleView(discord.ui.View):
             return
         await interaction.response.defer(ephemeral=True)
         try:
-            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+            conn = get_db_connection()
             c = conn.cursor()
             c.execute('SELECT minutes FROM dragonscales WHERE guild_id = ? AND user_id = ?',
                       (self.guild_id, self.selected_user.id))
@@ -329,7 +330,7 @@ class AdminInfoView(discord.ui.View):
             active_dragonscales.pop(gid, None)
             raid_boss_active.pop(gid, None)
 
-            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+            conn = get_db_connection()
             c = conn.cursor()
             c.execute('DELETE FROM dragonfest_stats WHERE guild_id = ?', (gid,))
             c.execute('DELETE FROM dragonscale_stats WHERE guild_id = ?', (gid,))

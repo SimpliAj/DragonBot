@@ -15,7 +15,7 @@ from typing import Optional
 from config import *
 from state import *
 import database
-from database import is_player_softlocked, update_balance, get_user
+from database import get_db_connection, is_player_softlocked, update_balance, get_user
 from utils import *
 from achievements import check_and_award_achievements, award_trophy
 
@@ -49,7 +49,7 @@ class DragonNestCog(commands.Cog):
         guild_id = interaction.guild_id
         user_id = interaction.user.id
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Get user balance for purchase checks
@@ -94,7 +94,7 @@ class DragonNestCog(commands.Cog):
                         await interaction.response.send_message(f"❌ Need {cost:,} 🪙, you have {int(self.balance):,} 🪙", ephemeral=True)
                         return
 
-                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                    conn = get_db_connection()
                     c = conn.cursor()
                     c.execute('''INSERT INTO user_items (guild_id, user_id, item_type, count)
                                  VALUES (?, ?, 'knowledge_book', 1)
@@ -122,7 +122,7 @@ class DragonNestCog(commands.Cog):
                         await interaction.response.send_message(f"❌ Need {cost:,} 🪙, you have {int(self.balance):,} 🪙", ephemeral=True)
                         return
 
-                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                    conn = get_db_connection()
                     c = conn.cursor()
                     c.execute('''INSERT INTO user_items (guild_id, user_id, item_type, count)
                                  VALUES (?, ?, 'precision_stone', 1)
@@ -209,7 +209,7 @@ class DragonNestCog(commands.Cog):
                 user_data = get_user(self.guild_id, self.user_id)
                 current_balance = user_data[2] if user_data else 0
 
-                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                conn = get_db_connection()
                 c = conn.cursor()
                 c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
                           (self.guild_id, self.user_id, 'knowledge_book'))
@@ -253,7 +253,7 @@ class DragonNestCog(commands.Cog):
                 user_data = get_user(self.guild_id, self.user_id)
                 current_balance = user_data[2] if user_data else 0
 
-                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                conn = get_db_connection()
                 c = conn.cursor()
                 c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
                           (self.guild_id, self.user_id, 'precision_stone'))
@@ -304,7 +304,7 @@ class DragonNestCog(commands.Cog):
         await interaction.response.defer(ephemeral=False)
 
         try:
-            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+            conn = get_db_connection()
             c = conn.cursor()
 
             # Get or create nest data
@@ -454,7 +454,7 @@ class DragonNestCog(commands.Cog):
                 )
 
                 # Get remaining missing perks count
-                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                conn = get_db_connection()
                 c = conn.cursor()
                 c.execute('SELECT COUNT(*) FROM user_perks WHERE guild_id = ? AND user_id = ?',
                           (interaction.guild_id, interaction.user.id))
@@ -494,7 +494,7 @@ class DragonNestCog(commands.Cog):
                                 return
 
                             try:
-                                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                conn = get_db_connection()
                                 c = conn.cursor()
 
                                 # Add perk to collection (not activated yet)
@@ -526,7 +526,7 @@ class DragonNestCog(commands.Cog):
                                 if remaining > 0:
                                     next_level = new_count + 1
 
-                                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                    conn = get_db_connection()
                                     c = conn.cursor()
                                     c.execute('SELECT perks_json FROM pending_perks WHERE guild_id = ? AND user_id = ? AND level = ?',
                                               (self.guild_id, self.user_id, next_level))
@@ -546,7 +546,7 @@ class DragonNestCog(commands.Cog):
                                             next_perks = stored_data if isinstance(stored_data, list) else []
                                     else:
                                         next_perks = generate_unique_perks(next_level, 3, upg_level_sel)
-                                        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                        conn = get_db_connection()
                                         c = conn.cursor()
                                         c.execute('''INSERT OR REPLACE INTO pending_perks (guild_id, user_id, level, perks_json)
                                                      VALUES (?, ?, ?, ?)''',
@@ -579,7 +579,7 @@ class DragonNestCog(commands.Cog):
                 return
 
             else:
-                c = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                c = get_db_connection()
                 cursor = c.cursor()
                 c.execute('DELETE FROM pending_perks WHERE guild_id = ? AND user_id = ?',
                           (interaction.guild_id, interaction.user.id))
@@ -608,7 +608,7 @@ class DragonNestCog(commands.Cog):
 
                 def create_callback(self, index, rarity, perk):
                     async def callback(interaction: discord.Interaction):
-                        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                        conn = get_db_connection()
                         c = conn.cursor()
 
                         c.execute('UPDATE user_perks SET selected = 1 WHERE guild_id = ? AND user_id = ? AND perk_id = ?',
@@ -638,7 +638,7 @@ class DragonNestCog(commands.Cog):
                 return
 
         # Normal Dragon Nest display
-        c = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        c = get_db_connection()
         cursor = c.cursor()
 
         cursor.execute('SELECT active_until FROM dragon_nest_active WHERE guild_id = ? AND user_id = ?',
@@ -749,7 +749,7 @@ class DragonNestCog(commands.Cog):
                 help_btn.callback = self.help_button
                 self.add_item(help_btn)
 
-                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                conn = get_db_connection()
                 c = conn.cursor()
                 c.execute('SELECT upgrade_level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
                           (guild_id, user_id))
@@ -795,7 +795,7 @@ class DragonNestCog(commands.Cog):
                 """Allow users to claim their missing perks"""
                 await interaction.response.defer()
 
-                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                conn = get_db_connection()
                 c = conn.cursor()
 
                 c.execute('SELECT level, upgrade_level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
@@ -814,7 +814,7 @@ class DragonNestCog(commands.Cog):
                     await self.show_tier_perk_selection(interaction, interaction.guild_id, interaction.user.id, tier=1, upgrade_level=upgrade_level)
                     return
 
-                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                conn = get_db_connection()
                 c = conn.cursor()
 
                 c.execute('SELECT level, upgrade_level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
@@ -927,7 +927,7 @@ class DragonNestCog(commands.Cog):
                                         return
 
                                     try:
-                                        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                        conn = get_db_connection()
                                         c = conn.cursor()
 
                                         expires_at = int(datetime(2099, 12, 31).timestamp())
@@ -1004,7 +1004,7 @@ class DragonNestCog(commands.Cog):
                 elif missing_level_perks > 0:
                     first_missing_level = perks_count + 1
 
-                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                    conn = get_db_connection()
                     c = conn.cursor()
                     c.execute('SELECT perks_json FROM pending_perks WHERE guild_id = ? AND user_id = ? AND level = ?',
                               (interaction.guild_id, interaction.user.id, first_missing_level))
@@ -1019,7 +1019,7 @@ class DragonNestCog(commands.Cog):
                             selected_perks = stored_data if isinstance(stored_data, list) else []
                     else:
                         selected_perks = generate_unique_perks(first_missing_level, 3, upgrade_level)
-                        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                        conn = get_db_connection()
                         c = conn.cursor()
                         c.execute('''INSERT OR REPLACE INTO pending_perks (guild_id, user_id, level, perks_json)
                                      VALUES (?, ?, ?, ?)''',
@@ -1065,7 +1065,7 @@ class DragonNestCog(commands.Cog):
                                     return
 
                                 try:
-                                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                    conn = get_db_connection()
                                     c = conn.cursor()
 
                                     c.execute('''INSERT OR IGNORE INTO user_perks (guild_id, user_id, perk_id, perk_name, perk_effect, perk_value, rarity)
@@ -1098,7 +1098,7 @@ class DragonNestCog(commands.Cog):
                                     if remaining > 0:
                                         next_level = new_count + 1
 
-                                        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                        conn = get_db_connection()
                                         c = conn.cursor()
                                         c.execute('SELECT perks_json FROM pending_perks WHERE guild_id = ? AND user_id = ? AND level = ?',
                                                   (self.guild_id, self.user_id, next_level))
@@ -1113,7 +1113,7 @@ class DragonNestCog(commands.Cog):
                                                 next_perks = stored_data if isinstance(stored_data, list) else []
                                         else:
                                             next_perks = generate_unique_perks(next_level, 3, upg_level)
-                                            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                            conn = get_db_connection()
                                             c = conn.cursor()
                                             c.execute('''INSERT OR REPLACE INTO pending_perks (guild_id, user_id, level, perks_json)
                                                          VALUES (?, ?, ?, ?)''',
@@ -1218,7 +1218,7 @@ class DragonNestCog(commands.Cog):
 
                                 await btn_interaction.response.defer()
 
-                                conn_perk = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                conn_perk = get_db_connection()
                                 c_perk = conn_perk.cursor()
 
                                 expires_at = int(datetime(2099, 12, 31).timestamp())
@@ -1277,7 +1277,7 @@ class DragonNestCog(commands.Cog):
                     traceback.print_exc()
 
             async def activate_nest(self, interaction: discord.Interaction):
-                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                conn = get_db_connection()
                 c = conn.cursor()
 
                 c.execute('SELECT expires_at FROM raid_bosses WHERE guild_id = ? AND expires_at > ?',
@@ -1379,7 +1379,7 @@ class DragonNestCog(commands.Cog):
                         rarity_name = rarity_names.get(bounty['rarity_level'], 'Rare')
                         bounty_list += f"📋 **Bounty {i}:** Catch {target} {rarity_name} or higher dragons\n"
 
-                c = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                c = get_db_connection()
                 cursor = c.cursor()
                 cursor.execute('SELECT xp, bounties_completed FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
                                (interaction.guild_id, interaction.user.id))
@@ -1426,7 +1426,7 @@ class DragonNestCog(commands.Cog):
                 """Upgrade Dragon Nest"""
                 await interaction.response.defer(ephemeral=False)
 
-                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                conn = get_db_connection()
                 c = conn.cursor()
 
                 c.execute('SELECT balance FROM users WHERE guild_id = ? AND user_id = ?',
@@ -1450,7 +1450,7 @@ class DragonNestCog(commands.Cog):
                         color=discord.Color.gold()
                     )
 
-                    conn_check = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                    conn_check = get_db_connection()
                     c_check = conn_check.cursor()
 
                     c_check.execute('SELECT upgrade_level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
@@ -1475,7 +1475,7 @@ class DragonNestCog(commands.Cog):
                             async def claim_button(self, btn_interaction: discord.Interaction, button: discord.ui.Button):
                                 await btn_interaction.response.defer()
 
-                                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                conn = get_db_connection()
                                 c = conn.cursor()
 
                                 c.execute('SELECT level, upgrade_level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
@@ -1554,7 +1554,7 @@ class DragonNestCog(commands.Cog):
 
                                             await confirm_interaction.response.defer()
 
-                                            conn_perk = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                            conn_perk = get_db_connection()
                                             c_perk = conn_perk.cursor()
 
                                             expires_at = int(datetime(2099, 12, 31).timestamp())
@@ -1658,7 +1658,7 @@ class DragonNestCog(commands.Cog):
 
                         await btn_interaction.response.defer()
 
-                        conn_upgrade = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                        conn_upgrade = get_db_connection()
                         c_upgrade = conn_upgrade.cursor()
 
                         c_upgrade.execute('SELECT balance FROM users WHERE guild_id = ? AND user_id = ?',
@@ -1739,7 +1739,7 @@ class DragonNestCog(commands.Cog):
                         random.shuffle(available_perks)
                         selected_perks = available_perks[:10]
 
-                        conn_store = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                        conn_store = get_db_connection()
                         c_store = conn_store.cursor()
 
                         c_store.execute('SELECT perks_json FROM pending_perks WHERE guild_id = ? AND user_id = ? AND level = 0',
@@ -1816,7 +1816,7 @@ class DragonNestCog(commands.Cog):
 
                                     await btn_interaction.response.defer()
 
-                                    conn_perk = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                    conn_perk = get_db_connection()
                                     c_perk = conn_perk.cursor()
 
                                     for perk_idx in self.selected_perks:
@@ -1868,7 +1868,7 @@ class DragonNestCog(commands.Cog):
                 await interaction.followup.send(embed=embed, view=view, ephemeral=False)
 
             async def view_perks(self, interaction: discord.Interaction):
-                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                conn = get_db_connection()
                 c = conn.cursor()
 
                 current_time = int(time.time())
@@ -1977,7 +1977,7 @@ class DragonNestCog(commands.Cog):
 
                         await btn_interaction.response.defer()
 
-                        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                        conn = get_db_connection()
                         c = conn.cursor()
 
                         c.execute('''SELECT perk_id, perk_name, perk_effect, perk_value, rarity FROM user_perks
@@ -2022,7 +2022,7 @@ class DragonNestCog(commands.Cog):
 
                                 await act_interaction.response.defer()
 
-                                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                conn = get_db_connection()
                                 c = conn.cursor()
 
                                 expires_at = int(time.time()) + 10800
@@ -2078,7 +2078,7 @@ class DragonNestCog(commands.Cog):
 
                                         await back_interaction.response.defer()
 
-                                        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                        conn = get_db_connection()
                                         c = conn.cursor()
                                         c.execute('SELECT level, xp, bounties_completed, bounties_active, upgrade_level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
                                                   (self.guild_id, self.user_id))
@@ -2178,7 +2178,7 @@ class DragonNestCog(commands.Cog):
                             await btn_interaction.response.send_message("This is not your menu!", ephemeral=False)
                             return
 
-                        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                        conn = get_db_connection()
                         c = conn.cursor()
                         c.execute('SELECT level, xp, bounties_completed, bounties_active, upgrade_level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
                                   (self.guild_id, self.user_id))
@@ -2281,7 +2281,7 @@ class DragonNestCog(commands.Cog):
 
                         await btn_interaction.response.defer()
 
-                        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                        conn = get_db_connection()
                         c = conn.cursor()
                         c.execute('SELECT level, xp, bounties_completed, bounties_active, upgrade_level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
                                   (outer_view.guild_id, outer_view.user_id))

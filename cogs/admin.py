@@ -19,7 +19,7 @@ from config import (
     DRAGON_TYPES, DRAGONNEST_UPGRADES, LEVEL_NAMES, PACK_TYPES,
     RAID_DURATION_HOURS, DEV_USER_ID, generate_unique_perks,
 )
-from database import get_user, is_player_softlocked, update_balance
+from database import get_db_connection, get_user, is_player_softlocked, update_balance
 from state import (
     active_breeding_sessions, active_dragonfest, active_dragonscales,
     active_luckycharms, active_spawns, active_usable_items,
@@ -108,7 +108,7 @@ async def handle_dev_command(message, command, args):
 
         if reset_all:
             # Reset for ALL users in the server
-            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+            conn = get_db_connection()
             try:
                 c = conn.cursor()
 
@@ -164,7 +164,7 @@ async def handle_dev_command(message, command, args):
                 return
 
             user = message.mentions[0]
-            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+            conn = get_db_connection()
             try:
                 c = conn.cursor()
 
@@ -237,7 +237,7 @@ async def handle_dev_command(message, command, args):
             return
 
         user = message.mentions[0]
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         try:
             c = conn.cursor()
 
@@ -348,7 +348,7 @@ async def handle_dev_command(message, command, args):
 
         current_time = int(time.time())
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         try:
             c = conn.cursor()
 
@@ -481,7 +481,7 @@ async def handle_dev_command(message, command, args):
 
         # Store message ID for live updates
         try:
-            conn2 = sqlite3.connect('dragon_bot.db', timeout=120.0)
+            conn2 = get_db_connection()
             c2 = conn2.cursor()
             c2.execute('UPDATE raid_bosses SET message_id = ? WHERE guild_id = ?', (raid_message.id, guild_id))
             conn2.commit()
@@ -671,7 +671,7 @@ async def handle_dev_command(message, command, args):
                             )
                             return
 
-                        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                        conn = get_db_connection()
                         c = conn.cursor()
 
                         c.execute('UPDATE users SET balance = balance - ? WHERE guild_id = ? AND user_id = ?',
@@ -769,7 +769,7 @@ async def handle_dev_command(message, command, args):
 
     # -db spawnstatus
     if command == 'spawnstatus':
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         current_time = int(time.time())
@@ -850,7 +850,7 @@ async def handle_dev_command(message, command, args):
 
     # -db resetspawn
     if command == 'resetspawn':
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         current_time = int(time.time())
@@ -887,7 +887,7 @@ async def handle_dev_command(message, command, args):
         removed_raidbosses = len(raid_boss_active)
         raid_boss_active.clear()
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute('DELETE FROM dragonfest_stats')
         c.execute('DELETE FROM dragonscale_stats')
@@ -945,7 +945,7 @@ async def handle_dev_command(message, command, args):
             await message.channel.send(embed=embed)
             return
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         try:
             c = conn.cursor()
 
@@ -1034,7 +1034,7 @@ async def handle_dev_command(message, command, args):
                     await interaction.response.send_message("❌ You've already claimed this giveaway!", ephemeral=False)
                     return
 
-                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                conn = get_db_connection()
                 c = conn.cursor()
 
                 selected_packs = []
@@ -1086,7 +1086,7 @@ async def handle_dev_command(message, command, args):
             await message.channel.send(f"❌ Invalid pack type! Valid: {', '.join(PACK_TYPES.keys())}")
             return
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         try:
             c = conn.cursor()
             c.execute('''INSERT INTO user_packs (guild_id, user_id, pack_type, count)
@@ -1129,7 +1129,7 @@ async def handle_dev_command(message, command, args):
         current_time = int(time.time())
         premium_end = current_time + (days * 86400)
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         try:
             c = conn.cursor()
             c.execute('''INSERT OR REPLACE INTO premium_users (guild_id, user_id, premium_until)
@@ -1238,7 +1238,7 @@ async def handle_dev_command(message, command, args):
 
     # -db resetquests
     if command == 'resetquests':
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         try:
             c = conn.cursor()
             current_time = int(time.time())
@@ -1253,7 +1253,7 @@ async def handle_dev_command(message, command, args):
 
     # -db resetbattlepass
     if command == 'resetbattlepass':
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute('UPDATE dragonpass SET level = 0, xp = 0, claimed_levels = "[]" WHERE guild_id = ?', (guild_id,))
         affected = c.rowcount
@@ -1265,7 +1265,7 @@ async def handle_dev_command(message, command, args):
 
     # -db resetbingo
     if command == 'resetbingo':
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         try:
             c = conn.cursor()
             c.execute('DELETE FROM bingo_cards WHERE guild_id = ?', (guild_id,))
@@ -1315,7 +1315,7 @@ async def handle_dev_command(message, command, args):
             return
 
         user = message.mentions[0]
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         c.execute('DELETE FROM breeding_cooldowns WHERE guild_id = ? AND user_id = ?',
@@ -1350,7 +1350,7 @@ async def handle_dev_command(message, command, args):
             return
 
         user = message.mentions[0]
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         c.execute('DELETE FROM adventure_cooldowns WHERE guild_id = ? AND user_id = ?',
@@ -1380,7 +1380,7 @@ async def handle_dev_command(message, command, args):
 
     # -db raidinfo
     if command == 'raidinfo':
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute('SELECT boss_name, boss_rarity, easy_hp, easy_max_hp, normal_hp, normal_max_hp, hard_hp, hard_max_hp, easy_participants, normal_participants, hard_participants, expires_at FROM raid_bosses WHERE guild_id = ?',
                   (guild_id,))
@@ -1425,7 +1425,7 @@ async def handle_dev_command(message, command, args):
 
     # -db raidkill
     if command == 'raidkill':
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         try:
             c = conn.cursor()
 
@@ -1458,7 +1458,7 @@ async def handle_dev_command(message, command, args):
 
     # -db dbstatus
     if command == 'dbstatus':
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         c.execute('SELECT COUNT(DISTINCT guild_id) FROM users')
@@ -1518,7 +1518,7 @@ async def handle_dev_command(message, command, args):
             await message.channel.send("❌ Level must be between 0 and 30!")
             return
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         bot_ref = message._state._get_client()
@@ -1637,7 +1637,7 @@ async def handle_dev_command(message, command, args):
 
     # -db list-softlock
     if command == 'list-softlock':
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         softlocked_users = []
@@ -1687,7 +1687,7 @@ async def handle_dev_command(message, command, args):
             return
 
         user = message.mentions[0]
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         c.execute('SELECT balance FROM users WHERE guild_id = ? AND user_id = ?',
@@ -1749,7 +1749,7 @@ async def handle_dev_command(message, command, args):
             await message.channel.send("❌ Level must be between 0 and 10!")
             return
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         c.execute('SELECT level FROM dragon_nest WHERE guild_id = ? AND user_id = ?',

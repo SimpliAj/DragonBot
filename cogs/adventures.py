@@ -6,6 +6,7 @@ import json
 import time
 from datetime import datetime
 from config import ADVENTURE_TYPES
+from database import get_db_connection
 
 
 class AdventuresCog(commands.Cog):
@@ -57,7 +58,7 @@ class AdventuresCog(commands.Cog):
 
         adventure_config = ADVENTURE_TYPES[adventure_type]
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         c.execute('SELECT COUNT(*) FROM user_adventures WHERE guild_id = ? AND user_id = ? AND adventure_type = ? AND status = "active"',
@@ -203,7 +204,7 @@ class AdventuresCog(commands.Cog):
                     """Actually create the adventure in database"""
                     await btn_interaction.response.defer()
                     
-                    conn2 = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                    conn2 = get_db_connection()
                     c2 = conn2.cursor()
 
                     current_time = int(time.time())
@@ -297,7 +298,7 @@ class AdventuresCog(commands.Cog):
             returns_at = current_time + duration
             dragons_json = json.dumps([])
 
-            conn2 = sqlite3.connect('dragon_bot.db', timeout=120.0)
+            conn2 = get_db_connection()
             c2 = conn2.cursor()
 
             c2.execute('''SELECT MAX(user_adventure_number) FROM user_adventures
@@ -345,7 +346,7 @@ class AdventuresCog(commands.Cog):
         """View your active adventures with option to see history"""
         await interaction.response.defer(ephemeral=False)
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         c.execute('''SELECT user_adventure_number, adventure_type, dragons_sent, returns_at, status, rewards_coins, rewards_dragons, claimed

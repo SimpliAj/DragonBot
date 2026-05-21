@@ -11,7 +11,7 @@ from config import (
 )
 from utils import format_time_remaining, safe_json_loads
 from achievements import check_and_award_achievements, send_quest_notification
-from database import update_balance
+from database import get_db_connection, update_balance
 from utils import check_dragonpass_quests
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ class SocialCog(commands.Cog):
         """Shows server leaderboards"""
         guild_id = interaction.guild_id
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         if category == "coins":
@@ -167,7 +167,7 @@ class SocialCog(commands.Cog):
         guild_id = interaction.guild_id
         user_id = interaction.user.id
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         current_time = int(time.time())
@@ -294,7 +294,7 @@ class SocialCog(commands.Cog):
                 logger.error(f"Error updating balance for bingo: {e}")
 
             try:
-                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                conn = get_db_connection()
                 c = conn.cursor()
                 c.execute('UPDATE bingo_cards SET completed = 1 WHERE guild_id = ? AND user_id = ?',
                           (guild_id, user_id))
@@ -328,7 +328,7 @@ class SocialCog(commands.Cog):
         guild_id = interaction.guild_id
         user_id = target_user.id
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         c.execute('SELECT balance FROM users WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))

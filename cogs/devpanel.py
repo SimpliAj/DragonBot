@@ -12,6 +12,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from config import DEV_USER_ID, DRAGON_TYPES, PACK_TYPES
+from database import get_db_connection
 
 # ── Select options (built once at import time) ────────────────────────────────
 _DRAGON_OPTIONS = [
@@ -400,7 +401,7 @@ class GiveDragonscaleView(discord.ui.View):
             return
         await interaction.response.defer(ephemeral=True)
         try:
-            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+            conn = get_db_connection()
             c = conn.cursor()
             c.execute('SELECT minutes FROM dragonscales WHERE guild_id = ? AND user_id = ?',
                       (self.guild_id, self.selected_user.id))

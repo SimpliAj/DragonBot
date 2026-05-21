@@ -156,7 +156,7 @@ async def show_dragon_pricecheck(interaction: discord.Interaction, dragon_type: 
 
     dragon_data = DRAGON_TYPES[dragon_type]
 
-    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Get last 10 sales
@@ -286,7 +286,7 @@ async def show_item_pricecheck(interaction: discord.Interaction, item_type: str)
     else:
         emoji, item_name = item_names[item_type]
 
-    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Get last 10 sales for this item
@@ -443,7 +443,7 @@ class InventoryItemsView(discord.ui.View):
             await interaction.response.send_message("❌ This is not your inventory!", ephemeral=False)
             return
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Check if user still has Lucky Charms
@@ -578,7 +578,7 @@ class InventoryItemsView(discord.ui.View):
         night_vision_activations[today_key] = tonight_date  # Track tonight's activation
 
         # Deduct item
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute('UPDATE user_items SET count = count - 1 WHERE guild_id = ? AND user_id = ? AND item_type = ?',
                   (self.guild_id, self.user_id, 'night_vision'))
@@ -634,7 +634,7 @@ class InventoryItemsView(discord.ui.View):
         activate_item(self.guild_id, self.user_id, 'lucky_dice', 30 * 60)  # 30 minutes
 
         # Deduct item
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute('UPDATE user_items SET count = count - 1 WHERE guild_id = ? AND user_id = ? AND item_type = ?',
                   (self.guild_id, self.user_id, 'lucky_dice'))
@@ -690,7 +690,7 @@ class InventoryItemsView(discord.ui.View):
             await interaction.response.send_message("❌ This is not your inventory!", ephemeral=False)
             return
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
                   (self.guild_id, self.user_id, 'mystery_box'))
@@ -786,7 +786,7 @@ class InventoryItemsView(discord.ui.View):
             await interaction.response.send_message("⏳ Gold Rush is already active!", ephemeral=False)
             return
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
                   (self.guild_id, self.user_id, 'gold_rush'))
@@ -827,7 +827,7 @@ class InventoryItemsView(discord.ui.View):
             await interaction.response.send_message("❌ This is not your inventory!", ephemeral=False)
             return
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
                   (self.guild_id, self.user_id, 'dice_of_fate'))
@@ -955,7 +955,7 @@ class DragonscaleMinutesModal(discord.ui.Modal, title="Activate Dragonscale"):
                     )
                     return
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Check if already active in server
@@ -1062,7 +1062,7 @@ class DragonsCog(commands.Cog):
         latency = round(self.bot.latency * 1000)
 
         # Count total dragons in database
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         c.execute('SELECT COUNT(DISTINCT guild_id || user_id) FROM users')
@@ -1335,7 +1335,7 @@ class DragonsCog(commands.Cog):
                 await interaction.response.send_message(embed=softlock_embed, delete_after=5)
                 return
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute('SELECT dragon_type, count FROM user_dragons WHERE guild_id = ? AND user_id = ? AND count > 0 ORDER BY count DESC',
                   (interaction.guild_id, target_user.id))
@@ -1575,7 +1575,7 @@ class DragonsCog(commands.Cog):
         await interaction.response.defer(ephemeral=False)
         guild_id = interaction.guild_id
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Get all discovered dragons
@@ -1651,7 +1651,7 @@ class DragonsCog(commands.Cog):
         guild_id = interaction.guild_id
         user_id = user.id
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Get balance

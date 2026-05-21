@@ -392,7 +392,7 @@ class EconomyCog(commands.Cog):
                         if category == 'pack':
                             await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, -total_price)
                             try:
-                                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                conn = get_db_connection()
                                 c = conn.cursor()
                                 c.execute('''INSERT INTO user_packs (guild_id, user_id, pack_type, count)
                                              VALUES (?, ?, ?, ?)
@@ -419,7 +419,7 @@ class EconomyCog(commands.Cog):
                             await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, -total_price)
                             minutes_to_add = (item_info['duration'] // 60) * qty
                             try:
-                                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                conn = get_db_connection()
                                 c = conn.cursor()
                                 c.execute('SELECT minutes FROM dragonscales WHERE guild_id = ? AND user_id = ?',
                                           (interaction.guild_id, modal_interaction.user.id))
@@ -450,7 +450,7 @@ class EconomyCog(commands.Cog):
                             await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, -total_price)
                             if item == 'luckycharm':
                                 try:
-                                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                    conn = get_db_connection()
                                     c = conn.cursor()
                                     c.execute('''INSERT INTO user_luckycharms (guild_id, user_id, count)
                                                  VALUES (?, ?, ?)
@@ -475,7 +475,7 @@ class EconomyCog(commands.Cog):
                                 await modal_interaction.response.send_message(embed=embed, ephemeral=False)
                             elif item == 'dna':
                                 try:
-                                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                    conn = get_db_connection()
                                     c = conn.cursor()
                                     c.execute('''INSERT INTO user_items (guild_id, user_id, item_type, count)
                                                  VALUES (?, ?, ?, ?)
@@ -506,7 +506,7 @@ class EconomyCog(commands.Cog):
                                 return
                             await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, -total_price)
                             try:
-                                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                conn = get_db_connection()
                                 c = conn.cursor()
                                 c.execute('''INSERT INTO user_items (guild_id, user_id, item_type, count)
                                              VALUES (?, ?, ?, ?)
@@ -545,7 +545,7 @@ class EconomyCog(commands.Cog):
                             # Enforce 1x purchase limit for shop trophies
                             if item in ('server_trophy', 'supporter_trophy'):
                                 try:
-                                    _conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                    _conn = get_db_connection()
                                     _c = _conn.cursor()
                                     _c.execute('SELECT count FROM user_items WHERE guild_id = ? AND user_id = ? AND item_type = ?',
                                                (interaction.guild_id, modal_interaction.user.id, item))
@@ -562,7 +562,7 @@ class EconomyCog(commands.Cog):
 
                             await asyncio.to_thread(update_balance, interaction.guild_id, modal_interaction.user.id, -total_price)
                             try:
-                                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                conn = get_db_connection()
                                 c = conn.cursor()
                                 c.execute('''INSERT INTO user_items (guild_id, user_id, item_type, count)
                                              VALUES (?, ?, ?, ?)
@@ -660,7 +660,7 @@ class EconomyCog(commands.Cog):
         reward = random.randint(50, 200)
         await asyncio.to_thread(update_balance, interaction.guild_id, interaction.user.id, reward)
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute('UPDATE users SET daily_last_claimed = ? WHERE guild_id = ? AND user_id = ?',
                   (current_time, interaction.guild_id, interaction.user.id))
@@ -773,7 +773,7 @@ class EconomyCog(commands.Cog):
             return
 
         # Check user balance
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute('SELECT balance FROM users WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
         result = c.fetchone()
@@ -899,7 +899,7 @@ class EconomyCog(commands.Cog):
                     return  # Interaction already responded
 
                 # Check bet still exists
-                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                conn = get_db_connection()
                 c = conn.cursor()
                 c.execute('SELECT status FROM coinflip_bets WHERE bet_id = ?', (self.bet_id,))
                 bet = c.fetchone()
@@ -952,7 +952,7 @@ class EconomyCog(commands.Cog):
                 await asyncio.to_thread(update_balance, interaction.guild_id, winner_id, self.amount * 2)
 
                 # Update bet status in DB
-                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                conn = get_db_connection()
                 c = conn.cursor()
                 c.execute('UPDATE coinflip_bets SET status = ? WHERE bet_id = ?', ('completed', self.bet_id))
 
@@ -1007,7 +1007,7 @@ class EconomyCog(commands.Cog):
                 except discord.errors.NotFound:
                     return  # Interaction already responded
 
-                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                conn = get_db_connection()
                 c = conn.cursor()
                 c.execute('UPDATE coinflip_bets SET status = ? WHERE bet_id = ?', ('declined', self.bet_id))
                 conn.commit()

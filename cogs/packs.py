@@ -15,7 +15,7 @@ from typing import Optional
 from config import *
 from state import *
 import database
-from database import is_player_softlocked, update_balance
+from database import get_db_connection, is_player_softlocked, update_balance
 from utils import *
 from achievements import send_quest_notification
 
@@ -45,7 +45,7 @@ class PacksCog(commands.Cog):
             await interaction.response.send_message(embed=softlock_embed, delete_after=5)
             return
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute('SELECT pack_type, count FROM user_packs WHERE guild_id = ? AND user_id = ? AND count > 0',
                   (interaction.guild_id, interaction.user.id))
@@ -68,7 +68,7 @@ class PacksCog(commands.Cog):
 
                 # Use provided packs list or fetch from database
                 if available_packs is None:
-                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                    conn = get_db_connection()
                     c = conn.cursor()
                     c.execute('SELECT pack_type, count FROM user_packs WHERE guild_id = ? AND user_id = ? AND count > 0',
                               (guild_id, user_id))
@@ -107,7 +107,7 @@ class PacksCog(commands.Cog):
                     return
 
                 # Get available packs
-                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                conn = get_db_connection()
                 c = conn.cursor()
                 c.execute('SELECT pack_type, count FROM user_packs WHERE guild_id = ? AND user_id = ? AND count > 0',
                           (self.guild_id, self.user_id))
@@ -204,7 +204,7 @@ class PacksCog(commands.Cog):
                                         total_dragonscales = 0
                                         total_upgrades = 0
 
-                                        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                        conn = get_db_connection()
                                         c = conn.cursor()
 
                                         # Get pack tier for rarity-based drop chances
@@ -360,7 +360,7 @@ class PacksCog(commands.Cog):
                         return
 
                     # Check if user still has pack
-                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                    conn = get_db_connection()
                     c = conn.cursor()
                     c.execute('SELECT count FROM user_packs WHERE guild_id = ? AND user_id = ? AND pack_type = ?',
                               (self.guild_id, self.user_id, pack_type))
@@ -566,7 +566,7 @@ class PacksCog(commands.Cog):
                         await add_dragons(self.guild_id, self.user_id, drag_key, drag_amount)
 
                     # Update Dragon Nest bounties if active
-                    nest_conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                    nest_conn = get_db_connection()
                     nest_c = nest_conn.cursor()
                     nest_active_check = nest_c.execute('SELECT active_until FROM dragon_nest_active WHERE guild_id = ? AND user_id = ?',
                                                         (self.guild_id, self.user_id)).fetchone()
@@ -620,7 +620,7 @@ class PacksCog(commands.Cog):
                     luckycharm_dropped = False
                     if random.random() < lucky_charm_chance:
                         luckycharm_dropped = True
-                        conn_charm = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                        conn_charm = get_db_connection()
                         c_charm = conn_charm.cursor()
                         c_charm.execute('''INSERT INTO user_luckycharms (guild_id, user_id, count)
                                            VALUES (?, ?, 1)
@@ -636,7 +636,7 @@ class PacksCog(commands.Cog):
                     if random.random() < dragonscale_chance:
                         dragonscale_minutes = random.randint(1, 3)
                         dragonscale_dropped = True
-                        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                        conn = get_db_connection()
                         c = conn.cursor()
                         c.execute('''INSERT INTO dragonscales (guild_id, user_id, minutes)
                                      VALUES (?, ?, ?)
@@ -693,7 +693,7 @@ class PacksCog(commands.Cog):
                     await asyncio.sleep(2)
 
                     # Fetch updated pack counts
-                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                    conn = get_db_connection()
                     c = conn.cursor()
                     c.execute('SELECT pack_type, count FROM user_packs WHERE guild_id = ? AND user_id = ? AND count > 0',
                               (self.guild_id, self.user_id))
@@ -754,7 +754,7 @@ class PacksCog(commands.Cog):
     async def alphadragons(self, interaction: discord.Interaction):
         """Alpha Dragon system (like Prisms)"""
         await interaction.response.defer(ephemeral=False)
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Count total server alphas
@@ -913,7 +913,7 @@ class PacksCog(commands.Cog):
             async def craft_alpha(self, interaction: discord.Interaction):
                 """Craft an Alpha Dragon"""
                 try:
-                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                    conn = get_db_connection()
                     c = conn.cursor()
 
                     # Re-check if user still has all types - must have at least 1 of EACH dragon type

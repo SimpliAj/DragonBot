@@ -7,6 +7,7 @@ import time
 from config import DRAGON_TYPES
 from utils import generate_dragonpass_quests
 from achievements import send_quest_notification
+from database import get_db_connection
 
 
 class DragonpassCog(commands.Cog):
@@ -18,7 +19,7 @@ class DragonpassCog(commands.Cog):
         """Dragonpass (Battlepass) system"""
         await interaction.response.defer(ephemeral=False)
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         c.execute('INSERT OR IGNORE INTO dragonpass (guild_id, user_id) VALUES (?, ?)',
@@ -285,7 +286,7 @@ class DragonpassCog(commands.Cog):
                     @discord.ui.button(label="Back", style=discord.ButtonStyle.blurple, emoji="◀️")
                     async def back_button(self, back_inter: discord.Interaction, btn: discord.ui.Button):
                         await back_inter.response.defer()
-                        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                        conn = get_db_connection()
                         c = conn.cursor()
                         c.execute('SELECT season, level, xp, quests_active, quest_refresh_time, claimed_levels FROM dragonpass WHERE guild_id = ? AND user_id = ?',
                                   (back_inter.guild_id, _owner_id))
@@ -307,7 +308,7 @@ class DragonpassCog(commands.Cog):
                         if not quests_active or len(existing_quests) < 4 or not has_vote_quest or current_time >= quest_refresh_time or has_raidboss_quest:
                             selected_quests = generate_dragonpass_quests(current_time, back_inter.guild_id, _owner_id)
                             quests_active = str(selected_quests)
-                            conn2 = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                            conn2 = get_db_connection()
                             c2 = conn2.cursor()
                             c2.execute('UPDATE dragonpass SET quests_active = ? WHERE guild_id = ? AND user_id = ?',
                                        (quests_active, back_inter.guild_id, _owner_id))
@@ -399,7 +400,7 @@ class DragonpassCog(commands.Cog):
 
                 await interaction.response.defer()
 
-                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                conn = get_db_connection()
                 c = conn.cursor()
 
                 c.execute('SELECT season, level, xp, quests_active, quest_refresh_time, claimed_levels FROM dragonpass WHERE guild_id = ? AND user_id = ?',

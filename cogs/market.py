@@ -90,7 +90,7 @@ class MarketCog(commands.Cog):
             await interaction.followup.send(embed=softlock_embed, delete_after=5)
             return
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         try:
@@ -520,7 +520,7 @@ class MarketCog(commands.Cog):
         """List a dragon or item for sale - 2 step process"""
         await interaction.response.defer()
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Check if user has any listing slots available
@@ -599,7 +599,7 @@ class MarketCog(commands.Cog):
                 await interaction.response.defer()
                 sellable_items = []
 
-                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                conn = get_db_connection()
                 c = conn.cursor()
 
                 if category == 'dragon':
@@ -750,7 +750,7 @@ class MarketCog(commands.Cog):
                                             return
 
                                         # Insert listing
-                                        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                        conn = get_db_connection()
                                         c = conn.cursor()
 
                                         item_type = None
@@ -884,7 +884,7 @@ class MarketCog(commands.Cog):
         """View user's active listings"""
         await interaction.response.defer(ephemeral=False)
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         c.execute('''SELECT listing_id, dragon_type, price, listed_at, item_type
@@ -946,7 +946,7 @@ class MarketCog(commands.Cog):
             def create_cancel_callback(self, listing_id, dragon_type, price, item_type):
                 async def callback(interaction: discord.Interaction):
                     # Remove listing
-                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                    conn = get_db_connection()
                     c = conn.cursor()
                     c.execute('DELETE FROM market_listings WHERE listing_id = ? AND seller_id = ?',
                               (listing_id, interaction.user.id))
@@ -1064,7 +1064,7 @@ class MarketCog(commands.Cog):
             return
 
         guild_id = interaction.guild_id
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Get your inventory - Dragons
@@ -1355,7 +1355,7 @@ class MarketCog(commands.Cog):
 
         async def create_trade_offer(init_inter, your_key, your_amount, their_key, their_amount, your_item_data, their_item_data):
             """Create and send the trade offer"""
-            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+            conn = get_db_connection()
             c = conn.cursor()
 
             # Store trade data
@@ -1380,7 +1380,7 @@ class MarketCog(commands.Cog):
                         await accept_inter.response.send_message("❌ You can't accept this trade!", ephemeral=False)
                         return
 
-                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                    conn = get_db_connection()
                     c = conn.cursor()
 
                     # Verify trade still exists
@@ -1502,7 +1502,7 @@ class MarketCog(commands.Cog):
                         await decline_inter.response.send_message("❌ You can't decline this trade!", ephemeral=False)
                         return
 
-                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                    conn = get_db_connection()
                     c = conn.cursor()
                     c.execute('UPDATE trade_offers SET status = "declined" WHERE trade_id = ?', (trade_id,))
                     conn.commit()
@@ -1576,7 +1576,7 @@ class MarketCog(commands.Cog):
         guild_id = interaction.guild_id
 
         # Get user's inventory
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Get user's balance (coins)
@@ -1726,7 +1726,7 @@ class MarketCog(commands.Cog):
                                     return
 
                                 # Transfer coins
-                                conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                conn = get_db_connection()
                                 c = conn.cursor()
                                 c.execute('UPDATE users SET balance = balance - ? WHERE guild_id = ? AND user_id = ?',
                                           (amount, guild_id, interaction.user.id))
@@ -1786,7 +1786,7 @@ class MarketCog(commands.Cog):
                             await add_dragons(guild_id, interaction.user.id, self.sel_item['key'], -amount)
                             await add_dragons(guild_id, user.id, self.sel_item['key'], amount)
                         elif self.sel_item['type'] == 'lucky_charm':
-                            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                            conn = get_db_connection()
                             c = conn.cursor()
                             c.execute('UPDATE user_luckycharms SET count = count - ? WHERE guild_id = ? AND user_id = ?',
                                       (amount, guild_id, interaction.user.id))
@@ -1795,7 +1795,7 @@ class MarketCog(commands.Cog):
                             conn.commit()
                             conn.close()
                         elif self.sel_item['type'] == 'dragonscale':
-                            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                            conn = get_db_connection()
                             c = conn.cursor()
                             c.execute('UPDATE dragonscales SET minutes = minutes - ? WHERE guild_id = ? AND user_id = ?',
                                       (amount, guild_id, interaction.user.id))
@@ -1804,7 +1804,7 @@ class MarketCog(commands.Cog):
                             conn.commit()
                             conn.close()
                         elif self.sel_item['type'] == 'dna':
-                            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                            conn = get_db_connection()
                             c = conn.cursor()
                             c.execute('UPDATE user_items SET count = count - ? WHERE guild_id = ? AND user_id = ? AND item_type = ?',
                                       (amount, guild_id, interaction.user.id, 'dna'))
@@ -1813,7 +1813,7 @@ class MarketCog(commands.Cog):
                             conn.commit()
                             conn.close()
                         elif self.sel_item['type'] == 'lucky_dice':
-                            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                            conn = get_db_connection()
                             c = conn.cursor()
                             c.execute('UPDATE user_items SET count = count - ? WHERE guild_id = ? AND user_id = ? AND item_type = ?',
                                       (amount, guild_id, interaction.user.id, 'lucky_dice'))
@@ -1822,7 +1822,7 @@ class MarketCog(commands.Cog):
                             conn.commit()
                             conn.close()
                         elif self.sel_item['type'] == 'night_vision':
-                            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                            conn = get_db_connection()
                             c = conn.cursor()
                             c.execute('UPDATE user_items SET count = count - ? WHERE guild_id = ? AND user_id = ? AND item_type = ?',
                                       (amount, guild_id, interaction.user.id, 'night_vision'))
@@ -1831,7 +1831,7 @@ class MarketCog(commands.Cog):
                             conn.commit()
                             conn.close()
                         elif self.sel_item['type'] == 'pack':
-                            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                            conn = get_db_connection()
                             c = conn.cursor()
                             c.execute('UPDATE user_packs SET count = count - ? WHERE guild_id = ? AND user_id = ? AND pack_type = ?',
                                       (amount, guild_id, interaction.user.id, self.sel_item['key']))
@@ -1914,7 +1914,7 @@ class MarketCog(commands.Cog):
                                 return
 
                             # Transfer coins
-                            conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                            conn = get_db_connection()
                             c = conn.cursor()
                             c.execute('UPDATE users SET balance = balance - ? WHERE guild_id = ? AND user_id = ?',
                                       (amount, guild_id, interaction.user.id))
@@ -1954,7 +1954,7 @@ class MarketCog(commands.Cog):
         """View user's active listings"""
         await interaction.response.defer(ephemeral=False)
 
-        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
 
         c.execute('''SELECT listing_id, dragon_type, price, listed_at, item_type
@@ -2016,7 +2016,7 @@ class MarketCog(commands.Cog):
             def create_cancel_callback(self, listing_id, dragon_type, price, item_type):
                 async def callback(interaction: discord.Interaction):
                     # Remove listing
-                    conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                    conn = get_db_connection()
                     c = conn.cursor()
                     c.execute('DELETE FROM market_listings WHERE listing_id = ? AND seller_id = ?',
                               (listing_id, interaction.user.id))
