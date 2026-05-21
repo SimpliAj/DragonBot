@@ -357,8 +357,22 @@ def generate_dragonpass_quests(current_time: int, guild_id: int = None, user_id:
             selected_quests.append(quest)
             seen_types.add(quest_type)
 
-    # 4th quest: always vote on top.gg
-    selected_quests.append({'type': 'vote_topgg', 'amount': 1, 'reward': 100})
+    # 4th quest: always vote on top.gg — pre-complete if voted in last 12h (global, not per-guild)
+    vote_quest = {'type': 'vote_topgg', 'amount': 1, 'reward': 100}
+    if user_id:
+        try:
+            from database import get_db_connection as _get_conn
+            _conn = _get_conn()
+            _c = _conn.cursor()
+            _c.execute('SELECT last_vote_time FROM vote_streaks WHERE user_id = ?', (user_id,))
+            _row = _c.fetchone()
+            _conn.close()
+            if _row and _row[0] and (current_time - _row[0]) < 43200:
+                vote_quest['progress'] = 1
+                vote_quest['completed'] = True
+        except Exception:
+            pass
+    selected_quests.append(vote_quest)
 
     return selected_quests
 
