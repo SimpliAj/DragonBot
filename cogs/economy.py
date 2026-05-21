@@ -14,7 +14,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from config import DRAGONNEST_UPGRADES, CONSUMABLE_ITEMS, MYSTERY_BOX_POOL, DICE_OF_FATE_EFFECTS
-from database import get_user, update_balance, get_active_item, is_player_softlocked
+from database import get_user, update_balance, get_active_item, is_player_softlocked, get_db_connection
 from state import active_luckycharms, active_usable_items
 from utils import format_time_remaining, check_dragonpass_quests
 from achievements import send_quest_notification
@@ -27,7 +27,7 @@ class EconomyCog(commands.Cog):
     async def cog_load(self):
         # Expire any pending coinflip bets that were left over from before restart
         try:
-            conn = sqlite3.connect('dragon_bot.db', timeout=60.0)
+            conn = get_db_connection()
             c = conn.cursor()
             c.execute("UPDATE coinflip_bets SET status = 'expired' WHERE status = 'pending' AND expires_at < ?",
                       (int(time.time()),))
@@ -879,7 +879,7 @@ class EconomyCog(commands.Cog):
 
             async def on_timeout(self):
                 try:
-                    conn = sqlite3.connect('dragon_bot.db', timeout=60.0)
+                    conn = get_db_connection()
                     c = conn.cursor()
                     c.execute("UPDATE coinflip_bets SET status = 'expired' WHERE bet_id = ? AND status = 'pending'", (self.bet_id,))
                     conn.commit()

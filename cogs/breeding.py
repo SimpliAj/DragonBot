@@ -300,7 +300,7 @@ class BreedingCog(commands.Cog):
                                         await inter4.response.defer()
 
                                         def breed_logic():
-                                            conn = sqlite3.connect('dragon_bot.db', timeout=60.0)
+                                            conn = get_db_connection()
                                             c = conn.cursor()
 
                                             try:

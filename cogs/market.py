@@ -312,7 +312,7 @@ class MarketCog(commands.Cog):
                 await interaction.response.defer()
 
                 # Re-fetch listing from database to ensure it's still available
-                conn = get_db_connection(timeout=60.0)
+                conn = get_db_connection()
                 c = conn.cursor()
                 try:
                     c.execute('''SELECT listing_id, seller_id, dragon_type, price, listed_at, item_type

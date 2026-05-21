@@ -179,7 +179,7 @@ def update_bingo_on_catch(guild_id: int, user_id: int, dragon_type: str) -> bool
 # ==================== BREEDING XP SYSTEM ====================
 def get_breeding_level_info(guild_id: int, user_id: int):
     """Get breeding level and XP info for user."""
-    conn = sqlite3.connect(DB_PATH, timeout=120.0)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute('SELECT level, xp FROM breeding_xp WHERE guild_id = ? AND user_id = ?',
               (guild_id, user_id))
@@ -197,7 +197,7 @@ def add_breeding_xp(guild_id: int, user_id: int, xp_amount: int, cursor=None, co
     """Add XP to user's breeding level and handle level-ups."""
     own_conn = conn is None
     if own_conn:
-        conn = sqlite3.connect(DB_PATH, timeout=60.0)
+        conn = get_db_connection()
         c = conn.cursor()
     else:
         c = cursor
@@ -261,7 +261,7 @@ def generate_dragonpass_quests(current_time: int, guild_id: int = None, user_id:
     has_bingo_cooldown = False
     if guild_id and user_id:
         try:
-            conn = sqlite3.connect(DB_PATH, timeout=120.0)
+            conn = get_db_connection()
             c = conn.cursor()
             c.execute('SELECT completed, expires_at FROM bingo_cards WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
             bingo_result = c.fetchone()
@@ -369,7 +369,7 @@ def check_dragonpass_quests(guild_id: int, user_id: int, action_type: str, amoun
 
     with lock:
         try:
-            conn = sqlite3.connect(DB_PATH, timeout=120.0)
+            conn = get_db_connection()
             c = conn.cursor()
             current_time = int(time.time())
             import ast
@@ -571,7 +571,7 @@ def get_higher_rarity_dragon(min_value: float = 0):
 # ==================== PERK SYSTEM ====================
 def get_user_perks(guild_id: int, user_id: int):
     """Get all active perks for a user (only non-expired ones)."""
-    conn = sqlite3.connect(DB_PATH, timeout=120.0)
+    conn = get_db_connection()
     c = conn.cursor()
     current_time = int(time.time())
 
@@ -593,7 +593,7 @@ def apply_perks(guild_id: int, user_id: int, base_amount: int, dragon_type: str)
     time_bonus = 0
     perks_applied = []
 
-    conn = sqlite3.connect(DB_PATH, timeout=120.0)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute('SELECT speedrun_catches FROM dragon_nest WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
     result = c.fetchone()
@@ -685,7 +685,7 @@ def apply_perks(guild_id: int, user_id: int, base_amount: int, dragon_type: str)
                 perks_applied.append(f"💎 {perk_name} (triggered)")
 
     if speedrun_count < 60:
-        conn = sqlite3.connect(DB_PATH, timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute('UPDATE dragon_nest SET speedrun_catches = speedrun_catches + 1 WHERE guild_id = ? AND user_id = ?',
                   (guild_id, user_id))
@@ -707,7 +707,7 @@ def get_spawn_channel(guild_id: int):
         return spawn_channels[guild_id]
 
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute('SELECT spawn_channel FROM guild_settings WHERE guild_id = ?', (guild_id,))
         result = c.fetchone()
@@ -725,7 +725,7 @@ def get_spawn_channel(guild_id: int):
 def set_spawn_channel(guild_id: int, channel_id: int):
     """Set spawn channel for guild."""
     spawn_channels[guild_id] = channel_id
-    conn = sqlite3.connect(DB_PATH, timeout=120.0)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute('INSERT OR REPLACE INTO guild_settings (guild_id, spawn_channel) VALUES (?, ?)',
               (guild_id, channel_id))
@@ -737,7 +737,7 @@ def set_spawn_channel(guild_id: int, channel_id: int):
 def get_setup_reminder_ignored_until(guild_id: int) -> int:
     """Return Unix timestamp until which the setup reminder is ignored for this guild (0 = not ignored)."""
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute('SELECT setup_reminder_ignored_until FROM guild_settings WHERE guild_id = ?', (guild_id,))
         result = c.fetchone()
@@ -750,7 +750,7 @@ def get_setup_reminder_ignored_until(guild_id: int) -> int:
 def set_setup_reminder_ignored_until(guild_id: int, until: int):
     """Store Unix timestamp until which setup reminder is suppressed for this guild."""
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute(
             'INSERT INTO guild_settings (guild_id, setup_reminder_ignored_until) VALUES (?, ?) '
@@ -774,7 +774,7 @@ def is_raid_boss_active(guild_id: int) -> bool:
             return True
 
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=120.0)
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute('SELECT expires_at FROM raid_bosses WHERE guild_id = ? AND expires_at > ?',
                   (guild_id, current_time))
@@ -822,7 +822,7 @@ def activate_item(guild_id: int, user_id: int, item_type: str, duration_seconds:
 
 def get_passive_bonus(guild_id: int, user_id: int, bonus_type: str) -> float:
     """Get passive item bonus."""
-    conn = sqlite3.connect(DB_PATH, timeout=120.0)
+    conn = get_db_connection()
     c = conn.cursor()
 
     if bonus_type == 'catch':

@@ -1402,7 +1402,7 @@ class DragonsCog(commands.Cog):
             unique_types = len(valid_dragons)
 
             # Calculate total market value (using marketplace prices if available, else base value)
-            conn_market = get_db_connection(timeout=60.0)
+            conn_market = get_db_connection()
             c_market = conn_market.cursor()
 
             for dragon_type, count in valid_dragons:

@@ -677,9 +677,8 @@ async def handle_dev_command(message, command, args):
                         c.execute('UPDATE users SET balance = balance - ? WHERE guild_id = ? AND user_id = ?',
                                   (price, gid, select_interaction.user.id))
 
-                        if market_item['is_dragon']:
-                            await add_dragons(gid, select_interaction.user.id, item_key, 1)
-                        else:
+                        dragon_purchase = market_item['is_dragon']
+                        if not dragon_purchase:
                             if item_key.startswith('pack_'):
                                 pack_type = item_key.split('_')[1]
                                 c.execute('''INSERT INTO user_packs (guild_id, user_id, pack_type, count)
@@ -711,6 +710,9 @@ async def handle_dev_command(message, command, args):
 
                         conn.commit()
                         conn.close()
+
+                        if dragon_purchase:
+                            await add_dragons(gid, select_interaction.user.id, item_key, 1)
 
                         market_item['stock'] -= 1
 

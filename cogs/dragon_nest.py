@@ -383,7 +383,7 @@ class DragonNestCog(commands.Cog):
                         level = self.level
 
                         def do_db_work():
-                            conn = sqlite3.connect('dragon_bot.db', timeout=30.0)
+                            conn = get_db_connection()
                             c = conn.cursor()
                             for dragon_type, count in sacrifice_list.items():
                                 c.execute('UPDATE user_dragons SET count = count - ? WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
@@ -400,7 +400,7 @@ class DragonNestCog(commands.Cog):
 
                             perk_store_level = current_level + 1 if current_level < 10 else 10
                             new_selected_perks = generate_unique_perks(perk_store_level, 3, 0)
-                            conn2 = sqlite3.connect('dragon_bot.db', timeout=30.0)
+                            conn2 = get_db_connection()
                             c2 = conn2.cursor()
                             c2.execute('''INSERT OR REPLACE INTO pending_perks (guild_id, user_id, level, perks_json)
                                          VALUES (?, ?, ?, ?)''',

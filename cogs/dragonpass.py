@@ -72,7 +72,7 @@ class DragonpassCog(commands.Cog):
                     pack_type = 'silver' if new_level % 2 == 0 else 'bronze'
                 else:
                     pack_type = 'diamond' if new_level % 2 == 0 else 'gold'
-            conn2 = sqlite3.connect('dragon_bot.db', timeout=30.0)
+            conn2 = get_db_connection()
             c2 = conn2.cursor()
             c2.execute('UPDATE dragonpass SET level = ?, claimed_levels = ? WHERE guild_id = ? AND user_id = ?',
                        (new_level, str(claimed_levels), interaction.guild_id, interaction.user.id))
