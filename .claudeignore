@@ -1,0 +1,13 @@
+node_modules/
+.next/
+__pycache__/
+*.pyc
+venv/
+.venv/
+dist/
+build/
+*.log
+*.min.js
+*.min.css
+.git/
+backups/

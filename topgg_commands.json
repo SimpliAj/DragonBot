@@ -1,0 +1,311 @@
+[
+  {
+    "name": "setchannel",
+    "description": "Set current channel as dragon spawn channel (Admin only)",
+    "options": []
+  },
+  {
+    "name": "serverconfig",
+    "description": "Configure server settings for raids & black market (Admin only)",
+    "options": []
+  },
+  {
+    "name": "bal",
+    "description": "Check your balance",
+    "options": [
+      {
+        "name": "user",
+        "description": "User to check balance for (leave empty for yourself)",
+        "type": 6,
+        "required": false
+      }
+    ]
+  },
+  {
+    "name": "casino",
+    "description": "Gamble your coins (50/50 chance to double or lose)",
+    "options": [
+      {
+        "name": "amount",
+        "description": "Amount of coins to gamble",
+        "type": 4,
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "shop",
+    "description": "Buy packs and boosts with coins",
+    "options": []
+  },
+  {
+    "name": "daily",
+    "description": "Claim your daily reward",
+    "options": []
+  },
+  {
+    "name": "vote",
+    "description": "Vote for the bot on Top.gg and get rewards!",
+    "options": []
+  },
+  {
+    "name": "coinflip",
+    "description": "Flip a coin for double or nothing! Challenge a player or the bot",
+    "options": [
+      {
+        "name": "amount",
+        "description": "Amount of coins to bet",
+        "type": 4,
+        "required": true
+      },
+      {
+        "name": "opponent",
+        "description": "Challenge another user (leave empty to play vs bot)",
+        "type": 6,
+        "required": false
+      }
+    ]
+  },
+  {
+    "name": "info",
+    "description": "View bot information and statistics",
+    "options": []
+  },
+  {
+    "name": "help",
+    "description": "View all available commands and how to use them",
+    "options": []
+  },
+  {
+    "name": "inventory",
+    "description": "View your dragon inventory",
+    "options": [
+      {
+        "name": "user",
+        "description": "User to view inventory for (leave empty for yourself)",
+        "type": 6,
+        "required": false
+      }
+    ]
+  },
+  {
+    "name": "pricecheck",
+    "description": "Check market prices for a dragon or item",
+    "options": []
+  },
+  {
+    "name": "dragonlogue",
+    "description": "View all discovered dragons in this server",
+    "options": []
+  },
+  {
+    "name": "stats",
+    "description": "View detailed statistics for a user",
+    "options": [
+      {
+        "name": "user",
+        "description": "User to check stats for (leave empty for yourself)",
+        "type": 6,
+        "required": false
+      }
+    ]
+  },
+  {
+    "name": "skill",
+    "description": "View your active passive item skills",
+    "options": []
+  },
+  {
+    "name": "dragonnest",
+    "description": "Access the Dragon Nest leveling system",
+    "options": []
+  },
+  {
+    "name": "dragonpass",
+    "description": "View your Dragonpass progress",
+    "options": []
+  },
+  {
+    "name": "openpacks",
+    "description": "Open your packs to get dragons",
+    "options": []
+  },
+  {
+    "name": "alphadragons",
+    "description": "View and craft Alpha Dragons",
+    "options": []
+  },
+  {
+    "name": "breed",
+    "description": "Cross-breed two dragons for a chance at higher rarity!",
+    "options": []
+  },
+  {
+    "name": "breedcalc",
+    "description": "Calculate breeding outcomes - select dragons from your inventory!",
+    "options": []
+  },
+  {
+    "name": "breedqueue",
+    "description": "Schedule automatic breeding or view your queue",
+    "options": [
+      {
+        "name": "action",
+        "description": "Action to perform",
+        "type": 3,
+        "required": true,
+        "choices": [
+          { "name": "Add to queue", "value": "add" },
+          { "name": "View queue", "value": "view" },
+          { "name": "Cancel slot", "value": "cancel" }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "ritual",
+    "description": "Start a community ritual to summon a raid boss",
+    "options": [
+      {
+        "name": "difficulty",
+        "description": "Choose raid difficulty",
+        "type": 3,
+        "required": true,
+        "choices": [
+          { "name": "Epic", "value": "epic" },
+          { "name": "Legendary", "value": "legendary" },
+          { "name": "Mythic", "value": "mythic" },
+          { "name": "Ultra", "value": "ultra" }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "raidstatus",
+    "description": "View the current raid boss and attack it!",
+    "options": []
+  },
+  {
+    "name": "market",
+    "description": "View and trade dragons in the server marketplace",
+    "options": [
+      {
+        "name": "rarity",
+        "description": "Filter by rarity",
+        "type": 3,
+        "required": false,
+        "choices": [
+          { "name": "Common", "value": "common" },
+          { "name": "Uncommon", "value": "uncommon" },
+          { "name": "Rare", "value": "rare" },
+          { "name": "Epic", "value": "epic" },
+          { "name": "Legendary", "value": "legendary" },
+          { "name": "Mythic", "value": "mythic" },
+          { "name": "Ultra", "value": "ultra" }
+        ]
+      },
+      {
+        "name": "sort_by",
+        "description": "Sort listings by",
+        "type": 3,
+        "required": false,
+        "choices": [
+          { "name": "Price: Low to High", "value": "price_asc" },
+          { "name": "Price: High to Low", "value": "price_desc" },
+          { "name": "Newest", "value": "newest" }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "marketsell",
+    "description": "List a dragon or item for sale in the marketplace",
+    "options": []
+  },
+  {
+    "name": "mylistings",
+    "description": "View and cancel your marketplace listings",
+    "options": []
+  },
+  {
+    "name": "trade",
+    "description": "Trade dragons/items with another user - select from inventory",
+    "options": [
+      {
+        "name": "user",
+        "description": "User to trade with",
+        "type": 6,
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "gift",
+    "description": "Gift dragons to another user",
+    "options": [
+      {
+        "name": "user",
+        "description": "User to gift to",
+        "type": 6,
+        "required": true
+      }
+    ]
+  },
+  {
+    "name": "adventure",
+    "description": "Send dragons on an adventure for rewards!",
+    "options": [
+      {
+        "name": "adventure_type",
+        "description": "Type of adventure",
+        "type": 3,
+        "required": true,
+        "choices": [
+          { "name": "Exploration (1h)", "value": "exploration" },
+          { "name": "Treasure Hunt (2h)", "value": "treasure_hunt" },
+          { "name": "Dragon Raid (3h)", "value": "dragon_raid" },
+          { "name": "Legendary Quest (6h)", "value": "legendary_quest" }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "adventures",
+    "description": "View your active adventures and rewards",
+    "options": []
+  },
+  {
+    "name": "leaderboard",
+    "description": "View server leaderboards",
+    "options": [
+      {
+        "name": "category",
+        "description": "Choose leaderboard category",
+        "type": 3,
+        "required": false,
+        "choices": [
+          { "name": "Coins", "value": "coins" },
+          { "name": "Dragons", "value": "dragons" },
+          { "name": "Rarest Dragon", "value": "rarest" }
+        ]
+      }
+    ]
+  },
+  {
+    "name": "bingo",
+    "description": "Play dragon bingo! Catch dragons to mark your card",
+    "options": []
+  },
+  {
+    "name": "achievements",
+    "description": "View your achievements and track your progress",
+    "options": [
+      {
+        "name": "user",
+        "description": "User to view achievements for (leave empty for yourself)",
+        "type": 6,
+        "required": false
+      }
+    ]
+  }
+]
