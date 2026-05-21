@@ -87,6 +87,7 @@ def build_vote_schedule_rows(day_in_cycle: int) -> list:
 
 def _update_vote_streak(user_id: int) -> dict:
     """Increment total_votes and streak, return updated info."""
+    conn = None
     try:
         conn = get_db_connection()
         c = conn.cursor()
@@ -96,6 +97,11 @@ def _update_vote_streak(user_id: int) -> dict:
         streak, last_vote, total, best = c.fetchone()
 
         now = int(time.time())
+
+        # Deduplicate: top.gg cooldown is 12h; same vote processed twice within 1h = duplicate
+        if last_vote and now - last_vote < 3600:
+            return {'current_streak': streak, 'last_vote_time': last_vote, 'total_votes': total, 'best_streak': best, '_duplicate': True}
+
         streak = streak + 1 if now - last_vote < 48 * 3600 else 1
         total += 1
         best = max(best, streak)
@@ -103,11 +109,13 @@ def _update_vote_streak(user_id: int) -> dict:
         c.execute('UPDATE vote_streaks SET current_streak=?, last_vote_time=?, total_votes=?, best_streak=?, reminder_sent_at=NULL WHERE user_id=?',
                   (streak, now, total, best, user_id))
         conn.commit()
-        conn.close()
         return {'current_streak': streak, 'last_vote_time': now, 'total_votes': total, 'best_streak': best}
     except Exception as e:
         logger.error(f"_update_vote_streak error: {e}")
         return {'current_streak': 1, 'last_vote_time': int(time.time()), 'total_votes': 1, 'best_streak': 1}
+    finally:
+        if conn:
+            conn.close()
 
 
 def _give_pack(guild_id: int, user_id: int, pack_type: str):
@@ -287,6 +295,9 @@ class TopggCog(commands.Cog):
 
     async def _process_vote(self, user_id: int, is_weekend: bool, is_test: bool = False):
         streak_info = _update_vote_streak(user_id)
+        if streak_info.get('_duplicate'):
+            logger.info(f"Duplicate vote ignored for user {user_id} (within 1h cooldown)")
+            return
         total = streak_info['total_votes']
         streak = streak_info['current_streak']
 
@@ -322,10 +333,10 @@ class TopggCog(commands.Cog):
             logger.info(f"Vote for user {user_id} — not in any shared guild.")
             return
 
-        update_balance(member.guild.id, user_id, reward['coins'])
-        _give_pack(member.guild.id, user_id, reward['pack'])
+        await asyncio.to_thread(update_balance, member.guild.id, user_id, reward['coins'])
+        await asyncio.to_thread(_give_pack, member.guild.id, user_id, reward['pack'])
         if is_weekend:
-            _give_pack(member.guild.id, user_id, VOTE_WEEKEND_BONUS_PACK)
+            await asyncio.to_thread(_give_pack, member.guild.id, user_id, VOTE_WEEKEND_BONUS_PACK)
 
         await self._notify(member, reward, day_in_cycle, streak, total, is_weekend, is_test)
         await check_and_award_achievements(member.guild.id, user_id, bot=self.bot)
