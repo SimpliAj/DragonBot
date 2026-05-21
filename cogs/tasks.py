@@ -1827,10 +1827,10 @@ class TasksCog(commands.Cog):
                 returns_at = int(returns_at) if returns_at else current_time
 
                 adventure_config = ADVENTURE_TYPES.get(adv_type, {})
-                coins_range = adventure_config.get('rewards', {}).get('coins', (100, 300))
-                dragon_chance = adventure_config.get('rewards', {}).get('dragon_chance', 0.15)
-
-                # Roll for overall success/failure
+                rewards_cfg = adventure_config.get('rewards', {})
+                coins_range = rewards_cfg.get('coins', (100, 300))
+                dragon_count_range = rewards_cfg.get('dragon_count', (1, 1))
+                dragon_weights = rewards_cfg.get('dragon_weights', [55, 30, 12, 3, 0, 0, 0])
                 success_rate = adventure_config.get('success_rate', 0.70)
 
                 # Initialize reward variables
@@ -1842,29 +1842,13 @@ class TasksCog(commands.Cog):
                     # Adventure succeeded! Roll for rewards
                     coins_earned = random.randint(coins_range[0], coins_range[1])
 
-                    # Roll for dragon
-                    if random.random() < dragon_chance:
-                        # Got a dragon! Rarity depends on adventure type
-                        possible_rarities = list(DRAGON_RARITY_TIERS.keys())
-
-                        # Different rarity weights based on adventure difficulty
-                        if adv_type == 'exploration':
-                            # Mostly common/uncommon
-                            weights = [60, 25, 10, 3, 1, 1, 0]
-                        elif adv_type == 'treasure_hunt':
-                            # More uncommon/rare
-                            weights = [40, 35, 15, 7, 2, 1, 0]
-                        elif adv_type == 'dragon_raid':
-                            # Epic and legendary possible
-                            weights = [25, 30, 25, 15, 4, 1, 0]
-                        else:  # legendary_quest
-                            # Best chance for high rarity
-                            weights = [10, 20, 30, 25, 10, 4, 1]
-
-                        reward_rarity = random.choices(possible_rarities, weights=weights)[0]
+                    # Roll for dragons
+                    possible_rarities = list(DRAGON_RARITY_TIERS.keys())
+                    num_dragons = random.randint(dragon_count_range[0], dragon_count_range[1])
+                    for _ in range(num_dragons):
+                        reward_rarity = random.choices(possible_rarities, weights=dragon_weights)[0]
                         reward_dragon = random.choice(DRAGON_RARITY_TIERS[reward_rarity])
 
-                        # Ensure reward_dragon is a string, not a list
                         if isinstance(reward_dragon, list):
                             reward_dragon = reward_dragon[0] if reward_dragon else 'stone'
 

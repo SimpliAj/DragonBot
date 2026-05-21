@@ -15,10 +15,10 @@ DRAGONPASS_QUEST_REWARDS = os.getenv('DRAGONPASS_QUEST_REWARDS', 'true').lower()
 
 # ==================== GLOBAL CONSTANTS ====================
 DB_PATH = 'dragon_bot.db'
-DB_TIMEOUT_SHORT = 30.0
-DB_TIMEOUT_MEDIUM = 60.0
-DB_TIMEOUT_LONG = 120.0
-DB_BUSY_TIMEOUT = 60000
+DB_TIMEOUT_SHORT = 5.0
+DB_TIMEOUT_MEDIUM = 10.0
+DB_TIMEOUT_LONG = 15.0
+DB_BUSY_TIMEOUT = 5000
 RETRY_MAX_ATTEMPTS = 5
 RETRY_DELAY = 0.2
 
@@ -322,45 +322,80 @@ def normalize_dragon_type(dragon_input: str) -> str:
 # ==================== ADVENTURE SYSTEM ====================
 ADVENTURE_TYPES = {
     'exploration': {
-        'duration': 1 * 3600,  # 1 hour cooldown
-        'success_rate': 0.70,  # 70% success, 30% fail
-        'rewards': {'coins': (100, 300), 'dragon_chance': 0.15, 'item_chance': 0.08},
+        'duration': 1 * 3600,
+        'success_rate': 0.75,
+        'rewards': {
+            'coins': (100, 300),
+            'dragon_count': (1, 1),
+            'dragon_weights': [55, 30, 12, 3, 0, 0, 0],  # common/uncommon/rare/epic/legendary/mythic/ultra
+            'item_chance': 0.08,
+        },
         'emoji': '🗺️'
     },
     'treasure_hunt': {
-        'duration': 2 * 3600,  # 2 hour cooldown
-        'success_rate': 0.65,  # 65% success, 35% fail
-        'rewards': {'coins': (400, 800), 'dragon_chance': 0.25, 'item_chance': 0.12},
+        'duration': 2 * 3600,
+        'success_rate': 0.70,
+        'rewards': {
+            'coins': (400, 800),
+            'dragon_count': (1, 3),
+            'dragon_weights': [40, 30, 20, 8, 2, 0, 0],
+            'item_chance': 0.12,
+        },
         'emoji': '💰'
     },
     'dragon_raid': {
-        'duration': 3 * 3600,  # 3 hour cooldown
-        'success_rate': 0.60,  # 60% success, 40% fail
-        'rewards': {'coins': (1000, 2000), 'dragon_chance': 0.35, 'item_chance': 0.15},
+        'duration': 3 * 3600,
+        'success_rate': 0.65,
+        'rewards': {
+            'coins': (1000, 2000),
+            'dragon_count': (2, 4),
+            'dragon_weights': [25, 30, 25, 15, 4, 1, 0],
+            'item_chance': 0.15,
+        },
         'emoji': '⚔️'
     },
     'legendary_quest': {
-        'duration': 6 * 3600,  # 6 hour cooldown
-        'success_rate': 0.68,  # 68% success, 32% fail
-        'rewards': {'coins': (2000, 4000), 'dragon_chance': 0.50, 'item_chance': 0.20},
+        'duration': 6 * 3600,
+        'success_rate': 0.60,
+        'rewards': {
+            'coins': (2000, 4000),
+            'dragon_count': (3, 5),
+            'dragon_weights': [15, 20, 30, 22, 10, 3, 0],
+            'item_chance': 0.20,
+        },
         'emoji': '🏆'
     },
     'mythical_expedition': {
-        'duration': 12 * 3600,  # 12 hour cooldown
-        'success_rate': 0.75,  # 75% success, 25% fail
-        'rewards': {'coins': (4000, 8000), 'dragon_chance': 0.60, 'item_chance': 0.23},
+        'duration': 12 * 3600,
+        'success_rate': 0.55,
+        'rewards': {
+            'coins': (4000, 8000),
+            'dragon_count': (4, 7),
+            'dragon_weights': [0, 15, 25, 30, 20, 8, 2],
+            'item_chance': 0.23,
+        },
         'emoji': '✨'
     },
     'ancient_awakening': {
-        'duration': 24 * 3600,  # 24 hour cooldown
-        'success_rate': 0.80,  # 80% success, 20% fail
-        'rewards': {'coins': (8000, 15000), 'dragon_chance': 0.70, 'item_chance': 0.26},
+        'duration': 24 * 3600,
+        'success_rate': 0.50,
+        'rewards': {
+            'coins': (8000, 15000),
+            'dragon_count': (6, 9),
+            'dragon_weights': [0, 0, 15, 25, 30, 22, 8],
+            'item_chance': 0.26,
+        },
         'emoji': '👑'
     },
     'dark_abyss': {
-        'duration': 48 * 3600,  # 48 hour cooldown
-        'success_rate': 0.85,  # 85% success, 15% fail
-        'rewards': {'coins': (15000, 30000), 'dragon_chance': 0.80, 'item_chance': 0.30},
+        'duration': 48 * 3600,
+        'success_rate': 0.40,
+        'rewards': {
+            'coins': (15000, 30000),
+            'dragon_count': (10, 14),
+            'dragon_weights': [0, 0, 10, 20, 35, 25, 10],
+            'item_chance': 0.30,
+        },
         'emoji': '🌑'
     }
 }
