@@ -1520,6 +1520,7 @@ class EventsCog(commands.Cog):
                                     logger.info(f"[DRAGONSCALE] Event ended or not active")
     
                             # Check Dragonpass quests
+                            _pending_quest_notifications = []
                             dragon_rarity_index = list(DRAGON_TYPES.keys()).index(dragon_key)
                             is_rare = dragon_rarity_index >= 6
     
