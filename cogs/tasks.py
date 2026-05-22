@@ -485,33 +485,9 @@ class TasksCog(commands.Cog):
         for guild in self.bot.guilds:
             guild_id = guild.id
 
-            # Skip if already has active spawn (clear stale spawns older than 20 min)
+            # Skip if already has active spawn — dragon stays until caught
             if guild_id in active_spawns:
-                spawn_age = int(time.time()) - active_spawns[guild_id].get('timestamp', int(time.time()))
-                if spawn_age > 1200:
-                    # Delete the stale discord message so it doesn't pile up
-                    old_msg_id = active_spawns[guild_id].get('message_id')
-                    old_ch_id = active_spawns[guild_id].get('channel_id')
-                    if old_msg_id and old_ch_id:
-                        try:
-                            old_ch = self.bot.get_channel(old_ch_id)
-                            if old_ch:
-                                old_msg = await old_ch.fetch_message(old_msg_id)
-                                await old_msg.delete()
-                        except Exception:
-                            pass
-                    del active_spawns[guild_id]
-                    try:
-                        _c = get_db_connection()
-                        try:
-                            _c.execute('DELETE FROM active_dragon_spawns WHERE guild_id = ?', (guild_id,))
-                            _c.commit()
-                        finally:
-                            _c.close()
-                    except Exception:
-                        pass
-                else:
-                    continue
+                continue
 
             # Check if spawn channel is set
             channel_id = get_spawn_channel(guild_id)
