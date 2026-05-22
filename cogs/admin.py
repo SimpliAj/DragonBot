@@ -1802,6 +1802,31 @@ async def handle_dev_command(message, command, args):
         await message.channel.send(embed=embed)
         return
 
+    if command == 'givefreeze':
+        # -db givefreeze @user N
+        if len(args) < 2:
+            await message.channel.send('Usage: `-db givefreeze @user <amount>`')
+            return
+        try:
+            target_id = int(args[0].strip('<@!>'))
+            amount = int(args[1])
+            if amount < 1:
+                raise ValueError
+        except (ValueError, IndexError):
+            await message.channel.send('Invalid usage. Example: `-db givefreeze @User 3`')
+            return
+        conn = get_db_connection()
+        try:
+            conn.execute('INSERT OR IGNORE INTO vote_streaks (user_id) VALUES (?)', (target_id,))
+            conn.execute('UPDATE vote_streaks SET streak_freezes = streak_freezes + ? WHERE user_id = ?', (amount, target_id))
+            conn.commit()
+            row = conn.execute('SELECT streak_freezes FROM vote_streaks WHERE user_id = ?', (target_id,)).fetchone()
+            total = row[0] if row else amount
+        finally:
+            conn.close()
+        await message.channel.send(f'✅ Gave **{amount}** streak freeze(s) to <@{target_id}>. Total: **{total}**')
+        return
+
 
 # ==================== SERVER CONFIG COMMAND ====================
 

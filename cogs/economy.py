@@ -684,13 +684,14 @@ class EconomyCog(commands.Cog):
         try:
             conn = get_db_connection()
             c = conn.cursor()
-            c.execute('SELECT current_streak, last_vote_time, total_votes, best_streak FROM vote_streaks WHERE user_id = ?',
+            c.execute('SELECT current_streak, last_vote_time, total_votes, best_streak, streak_freezes FROM vote_streaks WHERE user_id = ?',
                       (interaction.user.id,))
             row = c.fetchone()
             conn.close()
             if row:
                 streak_info = {'current_streak': row[0], 'last_vote_time': row[1],
-                               'total_votes': row[2], 'best_streak': row[3]}
+                               'total_votes': row[2], 'best_streak': row[3],
+                               'streak_freezes': row[4] or 0}
         except Exception:
             pass
 
@@ -719,10 +720,12 @@ class EconomyCog(commands.Cog):
         for row_label, row_visual in build_vote_schedule_rows(day_in_cycle):
             embed.add_field(name=f"📅 {row_label}", value=row_visual, inline=False)
 
+        freeze_text = f"\n❄️ Streak Freezes: **{streak_info.get('streak_freezes', 0)}**" if streak_info.get('streak_freezes', 0) > 0 else ""
         embed.add_field(
             name="🔥 Your Stats",
             value=(f"Streak: **{streak}** | Total votes: **{total}** | Best: **{streak_info['best_streak']}**\n"
-                   f"{'✅ Ready to vote!' if can_vote else '⏳ Already voted recently (12h cooldown)'}"),
+                   f"{'✅ Ready to vote!' if can_vote else '⏳ Already voted recently (12h cooldown)'}"
+                   f"{freeze_text}"),
             inline=False
         )
 

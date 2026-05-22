@@ -2172,13 +2172,22 @@ class TasksCog(commands.Cog):
             conn = get_db_connection()
             c = conn.cursor()
             c.execute(
-                'UPDATE vote_streaks SET current_streak = 0 WHERE current_streak > 0 AND last_vote_time < ?',
+                'SELECT user_id, streak_freezes FROM vote_streaks WHERE current_streak > 0 AND last_vote_time < ? AND (reminder_sent_at IS NULL OR reminder_sent_at = 0)',
                 (yesterday_midnight_ts,)
             )
-            affected = c.rowcount
+            rows = c.fetchall()
+            reset_count = 0
+            freeze_used_count = 0
+            for user_id, freezes in rows:
+                if freezes and freezes > 0:
+                    c.execute('UPDATE vote_streaks SET streak_freezes = streak_freezes - 1 WHERE user_id = ?', (user_id,))
+                    freeze_used_count += 1
+                else:
+                    c.execute('UPDATE vote_streaks SET current_streak = 0 WHERE user_id = ?', (user_id,))
+                    reset_count += 1
             conn.commit()
-            if affected > 0:
-                logger.info(f'vote_streak_reset: {affected} users had their streak reset')
+            if reset_count > 0 or freeze_used_count > 0:
+                logger.info(f'vote_streak_reset: {reset_count} resets, {freeze_used_count} freezes used')
         except Exception as e:
             logger.error(f"Error in vote_streak_reset_task: {e}", exc_info=True)
         finally:
@@ -2200,23 +2209,37 @@ class TasksCog(commands.Cog):
         conn = None
         try:
             now = int(time.time())
-            deadline = now - 4 * 3600  # 4 hours ago
+            deadline = now - 4 * 3600
 
             conn = get_db_connection()
             c = conn.cursor()
             c.execute(
-                '''UPDATE vote_streaks SET current_streak = 0, reminder_sent_at = NULL
+                '''SELECT user_id, streak_freezes FROM vote_streaks
                    WHERE current_streak > 0
                    AND reminder_sent_at IS NOT NULL
                    AND reminder_sent_at < ?
                    AND last_vote_time < reminder_sent_at''',
                 (deadline,)
             )
-            affected = c.rowcount
+            rows = c.fetchall()
+            reset_count = 0
+            freeze_used_count = 0
+            for user_id, freezes in rows:
+                if freezes and freezes > 0:
+                    c.execute(
+                        'UPDATE vote_streaks SET streak_freezes = streak_freezes - 1, reminder_sent_at = NULL WHERE user_id = ?',
+                        (user_id,)
+                    )
+                    freeze_used_count += 1
+                else:
+                    c.execute(
+                        'UPDATE vote_streaks SET current_streak = 0, reminder_sent_at = NULL WHERE user_id = ?',
+                        (user_id,)
+                    )
+                    reset_count += 1
             conn.commit()
-
-            if affected > 0:
-                logger.info(f'vote_reminder_deadline: {affected} users streak reset after 4h no-vote')
+            if reset_count > 0 or freeze_used_count > 0:
+                logger.info(f'vote_reminder_deadline: {reset_count} resets, {freeze_used_count} freezes used')
         except Exception as e:
             logger.error(f"vote_reminder_deadline_task error: {e}", exc_info=True)
         finally:
