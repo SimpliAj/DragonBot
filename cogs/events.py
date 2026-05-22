@@ -21,7 +21,7 @@ from config import (
     ERROR_WEBHOOK_URL, LEVEL_NAMES, PACK_TYPES,
 )
 from achievements import award_trophy, check_and_award_achievements, send_quest_notification
-from database import get_user, get_user_async, init_db, is_player_softlocked, update_balance, update_balance_and_check_trophies, get_db_connection
+from database import get_user, get_user_async, init_db, is_player_softlocked, update_balance, update_balance_and_check_trophies, get_db_connection, get_server_config
 from state import (
     active_dragonscales, active_dragonfest, active_luckycharms,
     active_spawns, active_usable_items, dragonscale_event_starts,
@@ -1319,6 +1319,26 @@ class EventsCog(commands.Cog):
                             await message.channel.send(random.choice(mock_messages))
                 else:
                     spawn_data = active_spawns[guild_id]
+
+                    # Anti-double catch check
+                    try:
+                        _adc_cfg = get_server_config(guild_id)
+                        if _adc_cfg.get('anti_double_catch'):
+                            _dragonfest = active_dragonfest.get(guild_id)
+                            _fest_active = _dragonfest and (
+                                (isinstance(_dragonfest, dict) and _dragonfest['end'] > time.time()) or
+                                (isinstance(_dragonfest, int) and _dragonfest > time.time())
+                            )
+                            if not _fest_active:
+                                _last = last_catch_attempts.get(guild_id)
+                                if _last and _last['user_id'] == message.author.id:
+                                    await message.channel.send(
+                                        f"🚫 {message.author.mention} You can't catch two dragons in a row! Let someone else catch one first.",
+                                        delete_after=8
+                                    )
+                                    return
+                    except Exception:
+                        pass
 
                     last_spawn_data[guild_id] = spawn_data.copy()
 

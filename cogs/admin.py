@@ -1889,6 +1889,17 @@ class ServerConfigView(discord.ui.View):
             view=ServerConfigView(self.guild_id),
         )
 
+    @discord.ui.button(label="Toggle Anti-Double Catch", style=discord.ButtonStyle.secondary, row=2)
+    async def toggle_anti_double_catch(self, interaction: discord.Interaction, button: discord.ui.Button):
+        from database import get_server_config, update_server_config
+        cfg = get_server_config(self.guild_id)
+        new_val = 0 if cfg['anti_double_catch'] else 1
+        update_server_config(self.guild_id, 'anti_double_catch', new_val)
+        await interaction.response.edit_message(
+            embed=_build_config_embed(self.guild_id),
+            view=ServerConfigView(self.guild_id),
+        )
+
     @discord.ui.button(label="Black Market Interval", style=discord.ButtonStyle.secondary, row=2)
     async def bm_interval(self, interaction: discord.Interaction, button: discord.ui.Button):
         from database import get_server_config
@@ -1920,6 +1931,12 @@ def _build_config_embed(guild_id: int) -> discord.Embed:
         value=(f"Status: **{bm_status}**\n"
                f"Min. Interval: **{cfg['blackmarket_interval_hours']}h**\n"
                f"Max. per Day: **{cfg['blackmarket_max_per_day']}x**"),
+        inline=False,
+    )
+    adc_status = "✅ Enabled" if cfg['anti_double_catch'] else "❌ Disabled"
+    embed.add_field(
+        name="🚫 Anti-Double Catch",
+        value=f"Status: **{adc_status}**\nSame user can't catch twice in a row\n*(Disabled during DragonFest)*",
         inline=False,
     )
     embed.set_footer(text="Raids and Black Market are disabled by default.")
