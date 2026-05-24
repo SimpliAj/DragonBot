@@ -586,6 +586,32 @@ ACHIEVEMENTS = {
     'vote_100': {'name': 'Top Voter', 'description': 'Vote 100 times total', 'category': '🗳️ Voting', 'requirement': 100, 'reward_coins': 10000, 'icon': '🏅'},
     'vote_streak_7': {'name': 'Weekly Supporter', 'description': 'Maintain a 7-day vote streak', 'category': '🗳️ Voting', 'requirement': 7, 'reward_coins': 1000, 'icon': '🔥'},
     'vote_streak_30': {'name': 'Monthly Supporter', 'description': 'Maintain a 30-day vote streak', 'category': '🗳️ Voting', 'requirement': 30, 'reward_coins': 5000, 'icon': '💎'},
+
+    # ===== GAMBLING ACHIEVEMENTS =====
+    'gamble_first': {'name': 'First Gamble', 'description': 'Use /casino for the first time', 'category': '🎰 Gambling', 'requirement': 1, 'reward_coins': 100, 'icon': '🎰'},
+    'gamble_10': {'name': 'Risk Taker', 'description': 'Use /casino 10 times', 'category': '🎰 Gambling', 'requirement': 10, 'reward_coins': 300, 'icon': '🎲'},
+    'gamble_50': {'name': 'Degenerate Gambler', 'description': 'Use /casino 50 times', 'category': '🎰 Gambling', 'requirement': 50, 'reward_coins': 1000, 'icon': '🃏'},
+    'roulette_first': {'name': 'Roulette Rookie', 'description': 'Play roulette for the first time', 'category': '🎰 Gambling', 'requirement': 1, 'reward_coins': 100, 'icon': '🎡'},
+    'roulette_10': {'name': 'Roulette Player', 'description': 'Play roulette 10 times', 'category': '🎰 Gambling', 'requirement': 10, 'reward_coins': 400, 'icon': '🔴'},
+    'roulette_50': {'name': 'Roulette Addict', 'description': 'Play roulette 50 times', 'category': '🎰 Gambling', 'requirement': 50, 'reward_coins': 2000, 'icon': '🎯'},
+
+    # ===== PACK OPENING ACHIEVEMENTS =====
+    'open_pack_1': {'name': 'First Pack', 'description': 'Open your first dragon pack', 'category': '📦 Packs', 'requirement': 1, 'reward_coins': 50, 'icon': '📦'},
+    'open_pack_10': {'name': 'Pack Opener', 'description': 'Open 10 dragon packs', 'category': '📦 Packs', 'requirement': 10, 'reward_coins': 200, 'icon': '🎁'},
+    'open_pack_50': {'name': 'Pack Addict', 'description': 'Open 50 dragon packs', 'category': '📦 Packs', 'requirement': 50, 'reward_coins': 1000, 'icon': '🎀'},
+    'open_pack_100': {'name': 'Pack Master', 'description': 'Open 100 dragon packs', 'category': '📦 Packs', 'requirement': 100, 'reward_coins': 5000, 'icon': '🏆'},
+
+    # ===== VOTE STREAK ACHIEVEMENTS =====
+    'vote_streak_3': {'name': 'On a Roll', 'description': 'Maintain a 3-day vote streak', 'category': '🗳️ Voting', 'requirement': 3, 'reward_coins': 300, 'icon': '🔥'},
+    'vote_streak_60': {'name': 'Two Month Supporter', 'description': 'Maintain a 60-day vote streak', 'category': '🗳️ Voting', 'requirement': 60, 'reward_coins': 15000, 'icon': '🌙'},
+    'vote_streak_100': {'name': 'Century Voter', 'description': 'Maintain a 100-day vote streak', 'category': '🗳️ Voting', 'requirement': 100, 'reward_coins': 50000, 'icon': '💯'},
+
+    # ===== HIDDEN ACHIEVEMENTS =====
+    'hidden_speed': {'name': '⚡ Speed Demon', 'description': 'Catch a dragon in under 3 seconds', 'category': '🔮 Hidden', 'requirement': 1, 'reward_coins': 500, 'icon': '⚡', 'hidden': True},
+    'hidden_lucky': {'name': '🍀 Dragon\'s Luck', 'description': 'Win at casino 5 times in a row', 'category': '🔮 Hidden', 'requirement': 5, 'reward_coins': 2000, 'icon': '🍀', 'hidden': True},
+    'hidden_midnight': {'name': '🌑 Midnight Dragon', 'description': 'Catch a dragon at exactly midnight (00:00)', 'category': '🔮 Hidden', 'requirement': 1, 'reward_coins': 1000, 'icon': '🌑', 'hidden': True},
+    'hidden_poor': {'name': '💸 Broke', 'description': 'Reach 0 coins', 'category': '🔮 Hidden', 'requirement': 1, 'reward_coins': 200, 'icon': '💸', 'hidden': True},
+    'hidden_roulette_zero': {'name': '🟢 Zero Hero', 'description': 'Win a roulette bet on number 0', 'category': '🔮 Hidden', 'requirement': 1, 'reward_coins': 3600, 'icon': '🟢', 'hidden': True},
 }
 
 # ==================== TROPHY CONFIG ====================

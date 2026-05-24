@@ -47,7 +47,17 @@ class DragonpassCog(commands.Cog):
         has_raidboss_quest = any(q.get('type') == 'attack_raidboss' for q in existing_quests)
         has_vote_quest = any(q.get('type') == 'vote_topgg' for q in existing_quests)
 
+        season_just_reset = False
         if not quests_active or len(existing_quests) < 4 or not has_vote_quest or current_time >= quest_refresh_time or has_raidboss_quest:
+            if level >= 30 and current_time >= quest_refresh_time:
+                season += 1
+                level = 0
+                xp = 0
+                claimed_levels = []
+                season_just_reset = True
+                c.execute('UPDATE dragonpass SET level = 0, xp = 0, claimed_levels = "[]", season = ? WHERE guild_id = ? AND user_id = ?',
+                          (season, interaction.guild_id, interaction.user.id))
+                conn.commit()
             selected_quests = generate_dragonpass_quests(current_time, interaction.guild_id, interaction.user.id)
             quests_json = str(selected_quests)
             quest_refresh_time = current_time + 43200
@@ -128,12 +138,14 @@ class DragonpassCog(commands.Cog):
             else:
                 progress_bar += "🟥"
 
+        seasons_badge = f"\n🏆 {season - 1} Season{'s' if season - 1 != 1 else ''} completed!" if season > 1 else ""
+        new_season_banner = f"\n\n🎉 **Season {season - 1} completed! Season {season} has begun!**" if season_just_reset else ""
         embed = discord.Embed(
             title=f"🎫 Dragonpass - Season {season}",
             description=f"### Level {level}/30\n"
                         f"{progress_bar} **{completed_count}/4 Quests**\n\n"
                         f"✨ Complete all 4 quests to level up!\n"
-                        f"🎁 Every level = 1 Pack reward!",
+                        f"🎁 Every level = 1 Pack reward!{seasons_badge}{new_season_banner}",
             color=discord.Color.gold()
         )
 
@@ -353,12 +365,13 @@ class DragonpassCog(commands.Cog):
                         completed_count = sum(1 for q in quests if q.get('completed', False))
                         progress_bar = "".join("🟩" if i < completed_count else "🟥" for i in range(4))
 
+                        _seasons_badge = f"\n🏆 {season - 1} Season{'s' if season - 1 != 1 else ''} completed!" if season > 1 else ""
                         back_embed = discord.Embed(
                             title=f"🎫 Dragonpass - Season {season}",
                             description=f"### Level {level}/30\n"
                                         f"{progress_bar} **{completed_count}/4 Quests**\n\n"
                                         f"✨ Complete all 4 quests to level up!\n"
-                                        f"🎁 Every level = 1 Pack reward!",
+                                        f"🎁 Every level = 1 Pack reward!{_seasons_badge}",
                             color=discord.Color.gold()
                         )
 
@@ -493,12 +506,13 @@ class DragonpassCog(commands.Cog):
                     else:
                         progress_bar += "🟥"
 
+                _seasons_badge2 = f"\n🏆 {season - 1} Season{'s' if season - 1 != 1 else ''} completed!" if season > 1 else ""
                 updated_embed = discord.Embed(
                     title=f"🎫 Dragonpass - Season {season}",
                     description=f"### Level {level}/30\n"
                                 f"{progress_bar} **{completed_count}/4 Quests**\n\n"
                                 f"✨ Complete all 4 quests to level up!\n"
-                                f"🎁 Every level = 1 Pack reward!",
+                                f"🎁 Every level = 1 Pack reward!{_seasons_badge2}",
                     color=discord.Color.gold()
                 )
 

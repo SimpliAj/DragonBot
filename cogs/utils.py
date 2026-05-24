@@ -329,6 +329,10 @@ def generate_dragonpass_quests(current_time: int, guild_id: int = None, user_id:
         {'type': 'use_coinflip', 'amount': 1, 'reward': 50},
         {'type': 'use_coinflip', 'amount': 3, 'reward': 100},
         {'type': 'use_coinflip', 'amount': 5, 'reward': 150},
+        {'type': 'use_roulette', 'amount': 1, 'reward': 50},
+        {'type': 'use_roulette', 'amount': 2, 'reward': 75},
+        {'type': 'use_roulette', 'amount': 3, 'reward': 100},
+        {'type': 'use_roulette', 'amount': 5, 'reward': 150},
         {'type': 'complete_trade', 'amount': 1, 'reward': 150},
         {'type': 'gift_dragon', 'amount': 1, 'reward': 100},
         {'type': 'catch_under_10s', 'amount': 1, 'reward': 100},
@@ -391,7 +395,7 @@ def check_dragonpass_quests(guild_id: int, user_id: int, action_type: str, amoun
             c.execute('INSERT OR IGNORE INTO dragonpass (guild_id, user_id, quest_refresh_time) VALUES (?, ?, ?)',
                       (guild_id, user_id, current_time + 43200))
 
-            c.execute('SELECT quests_active, level, claimed_levels, quest_refresh_time FROM dragonpass WHERE guild_id = ? AND user_id = ?',
+            c.execute('SELECT quests_active, level, claimed_levels, quest_refresh_time, season FROM dragonpass WHERE guild_id = ? AND user_id = ?',
                       (guild_id, user_id))
             result = c.fetchone()
 
@@ -400,14 +404,25 @@ def check_dragonpass_quests(guild_id: int, user_id: int, action_type: str, amoun
             claimed_levels = []
             quest_refresh_time = current_time + 43200
             needs_quest_regen = False
+            current_season = 1
 
             if result:
                 quests_active = result[0]
                 current_level = result[1] if result[1] else 0
                 claimed_levels = ast.literal_eval(result[2]) if result[2] else []
                 quest_refresh_time = result[3] if result[3] else current_time + 43200
+                current_season = result[4] if result[4] else 1
 
                 if not quests_active or (current_time >= quest_refresh_time):
+                    if current_level >= 30:
+                        # Pass completed — start new season on quest refresh
+                        new_season = current_season + 1
+                        c.execute('UPDATE dragonpass SET level = 0, xp = 0, claimed_levels = "[]", season = ? WHERE guild_id = ? AND user_id = ?',
+                                  (new_season, guild_id, user_id))
+                        conn.commit()
+                        current_level = 0
+                        claimed_levels = []
+                        current_season = new_season
                     quests = generate_dragonpass_quests(current_time, guild_id, user_id)
                     quest_refresh_time = current_time + 43200
                     needs_quest_regen = True
@@ -477,6 +492,8 @@ def check_dragonpass_quests(guild_id: int, user_id: int, action_type: str, amoun
                 elif action_type == 'open_pack' and quest_type == 'open_packs':
                     current_progress += amount
                 elif action_type == 'use_coinflip' and quest_type == 'use_coinflip':
+                    current_progress += amount
+                elif action_type == 'use_roulette' and quest_type == 'use_roulette':
                     current_progress += amount
                 elif action_type == 'check_bingo' and quest_type == 'check_bingo':
                     current_progress += amount

@@ -184,6 +184,32 @@ class GrantPassLevelsModal(discord.ui.Modal, title="Grant Dragonpass Level"):
             await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 
+class GiveStreakFreezeModal(discord.ui.Modal, title="Give Streak Freeze"):
+    amount = discord.ui.TextInput(label="Amount", placeholder="e.g. 1")
+
+    def __init__(self, bot, user):
+        super().__init__()
+        self.bot = bot
+        self.user = user
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            amt = int(self.amount.value)
+            if amt <= 0:
+                raise ValueError("Amount must be positive")
+            conn = get_db_connection()
+            conn.execute('INSERT OR IGNORE INTO vote_streaks (user_id) VALUES (?)', (self.user.id,))
+            conn.execute('UPDATE vote_streaks SET streak_freezes = streak_freezes + ? WHERE user_id = ?',
+                         (amt, self.user.id))
+            conn.commit()
+            conn.close()
+            await interaction.followup.send(
+                f"✅ Gave **{amt}** streak freeze(s) ❄️ to {self.user.mention}!", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
+
+
 class ResetUserModal(discord.ui.Modal):
     user_id = discord.ui.TextInput(label="User ID (or * for all)", placeholder="123456789012345678 or *")
 
@@ -446,6 +472,21 @@ class GrantPassView(discord.ui.View):
             embed=_give_embed("🎁 Give", discord.Color.green()), view=GiveView(self.bot))
 
 
+class GiveStreakFreezeView(discord.ui.View):
+    def __init__(self, bot):
+        super().__init__(timeout=120)
+        self.bot = bot
+
+    @discord.ui.select(cls=discord.ui.UserSelect, placeholder="Select user…", row=0)
+    async def user_select(self, interaction: discord.Interaction, select: discord.ui.UserSelect):
+        await interaction.response.send_modal(GiveStreakFreezeModal(self.bot, select.values[0]))
+
+    @discord.ui.button(label="← Back", style=discord.ButtonStyle.gray, row=1)
+    async def back(self, interaction: discord.Interaction, _):
+        await interaction.response.edit_message(
+            embed=_give_embed("🎁 Give", discord.Color.green()), view=GiveView(self.bot))
+
+
 # ── Category Views ─────────────────────────────────────────────────────────────
 
 class GiveView(discord.ui.View):
@@ -482,6 +523,12 @@ class GiveView(discord.ui.View):
         await interaction.response.edit_message(
             embed=_give_embed("🎫 Grant Dragonpass Level", discord.Color.purple()),
             view=GrantPassView(self.bot))
+
+    @discord.ui.button(label="Give Streak Freeze", emoji="❄️", style=discord.ButtonStyle.secondary)
+    async def give_streak_freeze(self, interaction: discord.Interaction, _):
+        await interaction.response.edit_message(
+            embed=_give_embed("❄️ Give Streak Freeze", discord.Color.teal()),
+            view=GiveStreakFreezeView(self.bot))
 
     @discord.ui.button(label="Giveaway", emoji="🎁", style=discord.ButtonStyle.secondary)
     async def giveaway(self, interaction: discord.Interaction, _):
@@ -684,6 +731,46 @@ class StatusView(discord.ui.View):
     async def back(self, interaction: discord.Interaction, _):
         await interaction.response.edit_message(embed=_main_embed(), view=DevPanelView(self.bot))
 
+    @discord.ui.button(label="🐉 Watching Dragons", style=discord.ButtonStyle.green, row=3)
+    async def preset_watching_dragons(self, interaction: discord.Interaction, _):
+        await self.bot.change_presence(
+            status=discord.Status.online,
+            activity=discord.Activity(type=discord.ActivityType.watching, name="dragons hatch across servers 🐉"),
+        )
+        await interaction.response.send_message("✅ Status: Watching dragons hatch across servers", ephemeral=True)
+
+    @discord.ui.button(label="🎮 Playing Dragon Bot", style=discord.ButtonStyle.green, row=3)
+    async def preset_playing_dragon_bot(self, interaction: discord.Interaction, _):
+        await self.bot.change_presence(
+            status=discord.Status.online,
+            activity=discord.Activity(type=discord.ActivityType.playing, name="Dragon Bot — Catch & Collect 🐉"),
+        )
+        await interaction.response.send_message("✅ Status: Playing Dragon Bot — Catch & Collect 🐉", ephemeral=True)
+
+    @discord.ui.button(label="🏆 Hosting Events", style=discord.ButtonStyle.green, row=3)
+    async def preset_hosting_events(self, interaction: discord.Interaction, _):
+        await self.bot.change_presence(
+            status=discord.Status.online,
+            activity=discord.Activity(type=discord.ActivityType.competing, name="Dragon Events | Join now!"),
+        )
+        await interaction.response.send_message("✅ Status: Competing in Dragon Events | Join now!", ephemeral=True)
+
+    @discord.ui.button(label="💤 Sleeping", style=discord.ButtonStyle.gray, row=3)
+    async def preset_sleeping(self, interaction: discord.Interaction, _):
+        await self.bot.change_presence(
+            status=discord.Status.idle,
+            activity=discord.Activity(type=discord.ActivityType.watching, name="over the dragon world 💤"),
+        )
+        await interaction.response.send_message("✅ Status: Idle — Watching over the dragon world", ephemeral=True)
+
+    @discord.ui.button(label="🔴 Maintenance", style=discord.ButtonStyle.red, row=3)
+    async def preset_maintenance(self, interaction: discord.Interaction, _):
+        await self.bot.change_presence(
+            status=discord.Status.dnd,
+            activity=discord.Activity(type=discord.ActivityType.watching, name="maintenance work 🔧"),
+        )
+        await interaction.response.send_message("✅ Status: Under Maintenance (DND)", ephemeral=True)
+
 
 # ── Main Panel ────────────────────────────────────────────────────────────────
 
@@ -740,6 +827,7 @@ class DevPanelView(discord.ui.View):
         await i.response.edit_message(
             embed=discord.Embed(title="🤖 Bot Status", color=discord.Color.blurple()),
             view=StatusView(self.bot))
+
 
 
 # ── Cog ────────────────────────────────────────────────────────────────────────

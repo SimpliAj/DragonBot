@@ -547,16 +547,22 @@ class TasksCog(commands.Cog):
                 from cogs.events import spawn_dragon
                 await spawn_dragon(guild_id, channel, self.bot)
                 # Update last_spawn_time after spawn completes
-                try:
-                    conn = get_db_connection()
+                for _attempt in range(5):
                     try:
-                        conn.execute('UPDATE spawn_config SET last_spawn_time = ? WHERE guild_id = ?',
-                                     (current_time, guild_id))
-                        conn.commit()
-                    finally:
-                        conn.close()
-                except sqlite3.OperationalError as e:
-                    print(f"Database error updating spawn time for guild {guild_id}: {e}")
+                        conn = get_db_connection()
+                        try:
+                            conn.execute('UPDATE spawn_config SET last_spawn_time = ? WHERE guild_id = ?',
+                                         (current_time, guild_id))
+                            conn.commit()
+                        finally:
+                            conn.close()
+                        break
+                    except sqlite3.OperationalError as e:
+                        if 'database is locked' in str(e) and _attempt < 4:
+                            await asyncio.sleep(0.5 * (2 ** _attempt))
+                        else:
+                            print(f"Database error updating spawn time for guild {guild_id}: {e}")
+                            break
             except discord.Forbidden:
                 try:
                     owner = await self.bot.fetch_user(guild.owner_id)

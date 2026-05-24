@@ -192,12 +192,12 @@ class EconomyCog(commands.Cog):
             'pack_stone':                    {'name': 'Stone Pack',         'price': 1000,   'emoji': '<:stonechest:1446169958265389247>'},
             'pack_bronze':                   {'name': 'Bronze Pack',        'price': 1500,   'emoji': '<:bronzechest:1446169758599745586>'},
             'boost_dragonscale':             {'name': 'Dragonscale (2min)', 'price': 20000,  'emoji': '<:dragonscale:1446278170998341693>', 'duration': 120},
-            'boost_premium':                 {'name': 'Dragonscale (10min)','price': 100000, 'emoji': '<:dragonscale:1446278170998341693>', 'duration': 600},
-            'item_luckycharm':               {'name': 'Lucky Charm',        'price': 15000,  'emoji': '🍀'},
-            'item_dna':                      {'name': 'DNA Sample',         'price': 12500,  'emoji': '🧬'},
-            'usable_night_vision':           {'name': 'Night Vision',       'price': 50000,  'emoji': '🌙'},
+            'boost_premium':                 {'name': 'Dragonscale (10min)','price': 200000, 'emoji': '<:dragonscale:1446278170998341693>', 'duration': 600},
+            'item_luckycharm':               {'name': 'Lucky Charm',        'price': 25000,  'emoji': '🍀'},
+            'item_dna':                      {'name': 'DNA Sample',         'price': 20000,  'emoji': '🧬'},
+            'usable_night_vision':           {'name': 'Night Vision',       'price': 75000,  'emoji': '🌙'},
             'usable_lucky_dice':             {'name': 'Lucky Dice',         'price': 10000,  'emoji': '🎰'},
-            'usable_gold_rush':              {'name': 'Gold Rush',          'price': 8000,   'emoji': '✨'},
+            'usable_gold_rush':              {'name': 'Gold Rush',          'price': 15000,  'emoji': '✨'},
             'consumable_mystery_box':        {'name': 'Mystery Box',        'price': 5000,   'emoji': '❓'},
             'consumable_dice_of_fate':       {'name': 'Dice of Fate',       'price': 3000,   'emoji': '🎲'},
             'consumable_fast_travel_scroll': {'name': 'Fast Travel Scroll', 'price': 8000,   'emoji': '📜'},
@@ -230,43 +230,43 @@ class EconomyCog(commands.Cog):
                 'lines': [
                     '⚡ **Dragonscale (2min)** — 20,000 🪙',
                     '   └─ Server-wide spawn event for 2 minutes',
-                    '⚡ **Dragonscale (10min)** — 100,000 🪙',
+                    '⚡ **Dragonscale (10min)** — 200,000 🪙',
                     '   └─ Server-wide spawn event for 10 minutes',
                 ],
                 'options': [
                     discord.SelectOption(label="Dragonscale (2min)",  description="20,000 🪙",  emoji="<:dragonscale:1446278170998341693>", value="boost_dragonscale"),
-                    discord.SelectOption(label="Dragonscale (10min)", description="100,000 🪙", emoji="<:dragonscale:1446278170998341693>", value="boost_premium"),
+                    discord.SelectOption(label="Dragonscale (10min)", description="200,000 🪙", emoji="<:dragonscale:1446278170998341693>", value="boost_premium"),
                 ],
             },
             'special': {
                 'label': 'Special Items', 'emoji': '🎁', 'color': 0x00CC77,
                 'description': 'Powerful items that go to your inventory for later use.',
                 'lines': [
-                    '🍀 **Lucky Charm** — 15,000 🪙',
+                    '🍀 **Lucky Charm** — 25,000 🪙',
                     '   └─ 2x Catch Rate for 30 min — activate in `/inventory`',
-                    '🧬 **DNA Sample** — 12,500 🪙',
+                    '🧬 **DNA Sample** — 20,000 🪙',
                     '   └─ Clone any dragon you own when breeding',
                 ],
                 'options': [
-                    discord.SelectOption(label="Lucky Charm", description="15,000 🪙 - 2x catch 30min", emoji="🍀", value="item_luckycharm"),
-                    discord.SelectOption(label="DNA Sample",  description="12,500 🪙 - Clone a dragon", emoji="🧬", value="item_dna"),
+                    discord.SelectOption(label="Lucky Charm", description="25,000 🪙 - 2x catch 30min", emoji="🍀", value="item_luckycharm"),
+                    discord.SelectOption(label="DNA Sample",  description="20,000 🪙 - Clone a dragon", emoji="🧬", value="item_dna"),
                 ],
             },
             'active': {
                 'label': 'Active Boosts', 'emoji': '💎', 'color': 0x9B59B6,
                 'description': 'Timed personal boosts — activate from `/inventory`.',
                 'lines': [
-                    '🌙 **Night Vision** — 50,000 🪙',
+                    '🌙 **Night Vision** — 75,000 🪙',
                     '   └─ +50% spawn rarity (20:00–08:00, once per night)',
                     '🎰 **Lucky Dice** — 10,000 🪙',
                     '   └─ +10% casino win chance for 30 minutes',
-                    '✨ **Gold Rush** — 8,000 🪙',
+                    '✨ **Gold Rush** — 15,000 🪙',
                     '   └─ +50% coin drops when catching dragons for 1 hour',
                 ],
                 'options': [
-                    discord.SelectOption(label="Night Vision", description="50,000 🪙 - +50% rarity (night)", emoji="🌙", value="usable_night_vision"),
+                    discord.SelectOption(label="Night Vision", description="75,000 🪙 - +50% rarity (night)", emoji="🌙", value="usable_night_vision"),
                     discord.SelectOption(label="Lucky Dice",   description="10,000 🪙 - +10% casino (30min)", emoji="🎰", value="usable_lucky_dice"),
-                    discord.SelectOption(label="Gold Rush",    description="8,000 🪙 - +50% coin drops (1h)", emoji="✨", value="usable_gold_rush"),
+                    discord.SelectOption(label="Gold Rush",    description="15,000 🪙 - +50% coin drops (1h)", emoji="✨", value="usable_gold_rush"),
                 ],
             },
             'raid': {
@@ -676,6 +676,10 @@ class EconomyCog(commands.Cog):
         """Vote for the bot on Top.gg"""
         await interaction.response.defer(ephemeral=False)
 
+        if not interaction.guild:
+            await interaction.followup.send("❌ Use `/vote` in a server, not in DMs!", ephemeral=True)
+            return
+
         from database import get_db_connection
         from cogs.topgg import get_vote_reward_for_day, build_vote_schedule_rows, register_vote_guild
         register_vote_guild(interaction.user.id, interaction.guild.id)
@@ -1042,6 +1046,155 @@ class EconomyCog(commands.Cog):
 
         view = CoinflipView(bet_id, user_id, opponent.id, amount)
         await interaction.followup.send(embed=embed, view=view)
+
+    # ==================== ROULETTE ====================
+
+    @app_commands.command(name="roulette", description="Spin the roulette wheel!")
+    @app_commands.choices(bet=[
+        app_commands.Choice(name="Red", value="red"),
+        app_commands.Choice(name="Black", value="black"),
+        app_commands.Choice(name="Even", value="even"),
+        app_commands.Choice(name="Odd", value="odd"),
+        app_commands.Choice(name="Number(s) — payout = 36÷count", value="number"),
+    ])
+    async def roulette(self, interaction: discord.Interaction, amount: int, bet: str, numbers: str = None):
+        """Roulette gambling system"""
+        is_softlocked, upgrade_level = is_player_softlocked(interaction.guild_id, interaction.user.id)
+        if is_softlocked:
+            next_upgrade_level = upgrade_level + 1
+            upgrade_cost = DRAGONNEST_UPGRADES.get(next_upgrade_level, {}).get('cost', 0)
+            await interaction.response.send_message(embed=discord.Embed(
+                title="🔒 Dragon Nest Upgrade Required!",
+                description=f"You have enough coins to upgrade your Dragon Nest!\n\n"
+                            f"**Current Level:** {upgrade_level}\n"
+                            f"**Upgrade Cost:** {upgrade_cost:,} 🪙\n\n"
+                            f"You're **softlocked** from gambling until you upgrade.\n"
+                            f"Use `/dragonnest` to upgrade!",
+                color=discord.Color.red()
+            ), delete_after=5)
+            return
+
+        if amount < 100:
+            await interaction.response.send_message("❌ Minimum bet is 100 coins! 🪙", ephemeral=False)
+            return
+
+        picked_numbers = []
+        if bet == "number":
+            if not numbers:
+                await interaction.response.send_message(
+                    "❌ Provide number(s) for a number bet, e.g. `7` or `7, 14, 3`", ephemeral=False)
+                return
+            try:
+                picked_numbers = [int(n.strip()) for n in numbers.replace(',', ' ').split() if n.strip()]
+            except ValueError:
+                await interaction.response.send_message("❌ Numbers must be integers, e.g. `7, 14, 3`", ephemeral=False)
+                return
+            if not picked_numbers or len(picked_numbers) > 12:
+                await interaction.response.send_message("❌ Pick between 1 and 12 numbers.", ephemeral=False)
+                return
+            if any(n < 0 or n > 36 for n in picked_numbers):
+                await interaction.response.send_message("❌ Each number must be between 0 and 36.", ephemeral=False)
+                return
+            picked_numbers = list(dict.fromkeys(picked_numbers))  # deduplicate, preserve order
+
+        user_data = get_user(interaction.guild_id, interaction.user.id)
+        balance = user_data[2]
+
+        # For number bets: charge per number (like real roulette)
+        total_cost = amount * len(picked_numbers) if bet == "number" else amount
+        if total_cost > balance:
+            await interaction.response.send_message(
+                f"❌ Not enough coins! Need **{int(total_cost):,}** 🪙 ({len(picked_numbers)}× {int(amount):,}). Balance: {int(balance):,} 🪙",
+                ephemeral=False)
+            return
+
+        if bet == "number":
+            bet_label = f"{', '.join(str(n) for n in picked_numbers)} ({len(picked_numbers)}× {int(amount):,} 🪙 = {int(total_cost):,} 🪙 total)"
+        else:
+            bet_label = bet
+
+        stages = [
+            ("🎡 Spinning...", "🎡 The wheel is spinning..."),
+            ("🎡 Spinning...", "🎡🎡 Almost there..."),
+            ("🎡 Spinning...", "🎡🎡🎡 Slowing down..."),
+        ]
+        embed = discord.Embed(
+            title=stages[0][0],
+            description=f"**Bet:** {bet_label}\n\n{stages[0][1]}",
+            color=discord.Color.yellow()
+        )
+        await interaction.response.send_message(embed=embed)
+        for i in range(1, len(stages)):
+            await asyncio.sleep(0.7)
+            embed.title = stages[i][0]
+            embed.description = f"**Bet:** {bet_label}\n\n{stages[i][1]}"
+            await interaction.edit_original_response(embed=embed)
+        await asyncio.sleep(0.7)
+
+        spin = random.randint(0, 36)
+        RED_NUMBERS = {1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36}
+        BLACK_NUMBERS = {2, 4, 6, 8, 10, 11, 13, 15, 17, 20, 22, 24, 26, 28, 29, 31, 33, 35}
+
+        if spin == 0:
+            color_emoji, color_name = "🟢", "Green"
+        elif spin in RED_NUMBERS:
+            color_emoji, color_name = "🔴", "Red"
+        else:
+            color_emoji, color_name = "⚫", "Black"
+
+        win = False
+        if bet == "red" and spin in RED_NUMBERS:
+            win = True
+            # win amount (net): amount back from the bet
+            net = amount  # 2x payout → net profit = amount
+        elif bet == "black" and spin in BLACK_NUMBERS:
+            win = True
+            net = amount
+        elif bet == "even" and spin != 0 and spin % 2 == 0:
+            win = True
+            net = amount
+        elif bet == "odd" and spin % 2 == 1:
+            win = True
+            net = amount
+        elif bet == "number" and spin in picked_numbers:
+            win = True
+            # 36x payout on the winning chip, all other chips lost
+            # gross = 36 * amount, cost = total_cost, net = 36*amount - total_cost
+            net = amount * 36 - total_cost
+
+        if win:
+            await asyncio.to_thread(update_balance, interaction.guild_id, interaction.user.id, net)
+            new_balance = balance + net
+            if bet == "number":
+                payout_info = f"36× {int(amount):,} 🪙 − {int(total_cost):,} 🪙 (other bets) = **+{int(net):,} 🪙**"
+            else:
+                payout_info = f"+{int(net):,} 🪙 (2×)"
+            final_embed = discord.Embed(
+                title="🎡 Roulette — YOU WIN!",
+                description=f"**Result:** {color_emoji} **{spin}** ({color_name})\n\n"
+                            f"**Bet:** {bet_label}\n"
+                            f"**Won:** {payout_info}\n\n"
+                            f"**New Balance:** {int(new_balance):,} 🪙",
+                color=discord.Color.green()
+            )
+        else:
+            await asyncio.to_thread(update_balance, interaction.guild_id, interaction.user.id, -total_cost)
+            new_balance = balance - total_cost
+            final_embed = discord.Embed(
+                title="🎡 Roulette — YOU LOSE!",
+                description=f"**Result:** {color_emoji} **{spin}** ({color_name})\n\n"
+                            f"**Bet:** {bet_label}\n"
+                            f"**Lost:** -{int(total_cost):,} 🪙\n\n"
+                            f"**New Balance:** {int(new_balance):,} 🪙",
+                color=discord.Color.red()
+            )
+
+        await interaction.edit_original_response(embed=final_embed)
+
+        # Track for dragonpass quest
+        _qr = await asyncio.to_thread(check_dragonpass_quests, interaction.guild_id, interaction.user.id, 'use_roulette', 1)
+        if _qr and _qr[3]:
+            await send_quest_notification(interaction.client, interaction.guild_id, interaction.user.id, _qr[3])
 
 
 async def setup(bot: commands.Bot):

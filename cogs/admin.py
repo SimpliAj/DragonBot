@@ -1257,7 +1257,7 @@ async def handle_dev_command(message, command, args):
     if command == 'resetbattlepass':
         conn = get_db_connection()
         c = conn.cursor()
-        c.execute('UPDATE dragonpass SET level = 0, xp = 0, claimed_levels = "[]" WHERE guild_id = ?', (guild_id,))
+        c.execute('UPDATE dragonpass SET level = 0, xp = 0, claimed_levels = "[]", quests_active = NULL WHERE guild_id = ?', (guild_id,))
         affected = c.rowcount
         conn.commit()
         conn.close()
