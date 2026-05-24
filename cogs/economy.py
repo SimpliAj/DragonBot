@@ -17,7 +17,40 @@ from config import DRAGONNEST_UPGRADES, CONSUMABLE_ITEMS, MYSTERY_BOX_POOL, DICE
 from database import get_user, update_balance, get_active_item, is_player_softlocked, get_db_connection
 from state import active_luckycharms, active_usable_items
 from utils import format_time_remaining, check_dragonpass_quests
-from achievements import send_quest_notification
+from achievements import send_quest_notification, check_and_award_achievements, award_specific_achievement
+
+
+def _update_casino_stats(guild_id: int, user_id: int, won: bool) -> int:
+    """Increment casino_count. Update win_streak (+1 on win, reset on loss). Returns new win_streak."""
+    conn = get_db_connection()
+    try:
+        c = conn.cursor()
+        if won:
+            c.execute(
+                'UPDATE users SET casino_count = casino_count + 1, casino_win_streak = casino_win_streak + 1 WHERE guild_id = ? AND user_id = ?',
+                (guild_id, user_id),
+            )
+        else:
+            c.execute(
+                'UPDATE users SET casino_count = casino_count + 1, casino_win_streak = 0 WHERE guild_id = ? AND user_id = ?',
+                (guild_id, user_id),
+            )
+        conn.commit()
+        c.execute('SELECT casino_win_streak FROM users WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
+        row = c.fetchone()
+        return row[0] if row else 0
+    finally:
+        conn.close()
+
+
+def _increment_roulette_count(guild_id: int, user_id: int):
+    conn = get_db_connection()
+    try:
+        c = conn.cursor()
+        c.execute('UPDATE users SET roulette_count = roulette_count + 1 WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 class EconomyCog(commands.Cog):
@@ -147,6 +180,14 @@ class EconomyCog(commands.Cog):
             )
 
         await interaction.edit_original_response(embed=final_embed)
+
+        # Track stats + achievements
+        _win_streak = await asyncio.to_thread(_update_casino_stats, interaction.guild_id, interaction.user.id, win)
+        if new_balance <= 0:
+            await award_specific_achievement(interaction.guild_id, interaction.user.id, 'hidden_poor', bot=interaction.client)
+        if win and _win_streak >= 5:
+            await award_specific_achievement(interaction.guild_id, interaction.user.id, 'hidden_lucky', bot=interaction.client)
+        await check_and_award_achievements(interaction.guild_id, interaction.user.id, bot=interaction.client)
 
         # Track for dragonpass quest
         _qr = await asyncio.to_thread(check_dragonpass_quests, interaction.guild_id, interaction.user.id, 'use_casino', 1)
@@ -648,6 +689,10 @@ class EconomyCog(commands.Cog):
 
     @app_commands.command(name="daily", description="Claim your daily reward")
     async def daily(self, interaction: discord.Interaction):
+        if not interaction.guild:
+            await interaction.response.send_message("❌ Use this command in a server!", ephemeral=True)
+            return
+
         user_data = get_user(interaction.guild_id, interaction.user.id)
         current_time = int(time.time())
         last_claimed = user_data[3]
@@ -657,17 +702,69 @@ class EconomyCog(commands.Cog):
             await interaction.response.send_message(f"⏰ Daily already claimed! Come back in {format_time_remaining(time_left)}", ephemeral=False)
             return
 
-        reward = random.randint(50, 200)
-        await asyncio.to_thread(update_balance, interaction.guild_id, interaction.user.id, reward)
-
+        # Streak logic: breaks if > 48h since last claim (missed a day)
         conn = get_db_connection()
         c = conn.cursor()
-        c.execute('UPDATE users SET daily_last_claimed = ? WHERE guild_id = ? AND user_id = ?',
-                  (current_time, interaction.guild_id, interaction.user.id))
+        c.execute('SELECT daily_streak FROM users WHERE guild_id = ? AND user_id = ?',
+                  (interaction.guild_id, interaction.user.id))
+        row = c.fetchone()
+        current_streak = row[0] if row and row[0] else 0
+
+        if last_claimed > 0 and current_time - last_claimed > 48 * 3600:
+            current_streak = 0  # missed a day, reset
+        new_streak = current_streak + 1
+
+        # Milestone rewards
+        _DAILY_MILESTONES = {
+            3:   (500,   'wooden'),
+            7:   (1000,  'stone'),
+            14:  (2000,  'bronze'),
+            30:  (3000,  'silver'),
+            60:  (5000,  'gold'),
+            100: (10000, 'diamond'),
+        }
+        base_reward = random.randint(50, 200)
+        bonus_coins = 0
+        bonus_pack = None
+        if new_streak in _DAILY_MILESTONES:
+            bonus_coins, bonus_pack = _DAILY_MILESTONES[new_streak]
+
+        total_coins = base_reward + bonus_coins
+        await asyncio.to_thread(update_balance, interaction.guild_id, interaction.user.id, total_coins)
+
+        if bonus_pack:
+            c.execute('''INSERT INTO user_packs (guild_id, user_id, pack_type, count)
+                         VALUES (?, ?, ?, 1) ON CONFLICT(guild_id, user_id, pack_type)
+                         DO UPDATE SET count = count + 1''',
+                      (interaction.guild_id, interaction.user.id, bonus_pack))
+
+        c.execute('UPDATE users SET daily_last_claimed = ?, daily_streak = ? WHERE guild_id = ? AND user_id = ?',
+                  (current_time, new_streak, interaction.guild_id, interaction.user.id))
         conn.commit()
         conn.close()
 
-        await interaction.response.send_message(f"🎁 Daily reward claimed! +{reward} 🪙", ephemeral=False)
+        # Find next milestone
+        next_milestone = next((d for d in sorted(_DAILY_MILESTONES.keys()) if d > new_streak), None)
+
+        _PACK_NAMES = {'wooden': '📦 Wooden', 'stone': '🗿 Stone', 'bronze': '🥉 Bronze',
+                       'silver': '<:silverdragon2:1508178716344455169> Silver', 'gold': '🥇 Gold', 'diamond': '💎 Diamond'}
+        _MILESTONE_EMOJIS = {3: '🔥', 7: '⭐', 14: '💫', 30: '🌟', 60: '👑', 100: '🏆'}
+
+        desc = f"**+{total_coins:,} 🪙**"
+        if bonus_pack:
+            desc += f"\n{_MILESTONE_EMOJIS.get(new_streak, '🎉')} **Milestone Day {new_streak}!** +{_PACK_NAMES[bonus_pack]} Pack"
+        if next_milestone:
+            days_left = next_milestone - new_streak
+            desc += f"\n\n📅 Next milestone: **Day {next_milestone}** — {days_left} day{'s' if days_left != 1 else ''} to go"
+
+        streak_reset_warning = "\n⚠️ Streak resets if you miss a day!" if new_streak == 1 and last_claimed > 0 else ""
+
+        embed = discord.Embed(
+            title=f"🎁 Daily Reward — Day {new_streak} 🔥",
+            description=desc + streak_reset_warning,
+            color=discord.Color.gold()
+        )
+        await interaction.response.send_message(embed=embed)
 
     # ==================== VOTE ====================
 
@@ -1190,6 +1287,14 @@ class EconomyCog(commands.Cog):
             )
 
         await interaction.edit_original_response(embed=final_embed)
+
+        # Track stats + achievements
+        await asyncio.to_thread(_increment_roulette_count, interaction.guild_id, interaction.user.id)
+        if new_balance <= 0:
+            await award_specific_achievement(interaction.guild_id, interaction.user.id, 'hidden_poor', bot=interaction.client)
+        if win and bet == 'number' and spin == 0:
+            await award_specific_achievement(interaction.guild_id, interaction.user.id, 'hidden_roulette_zero', bot=interaction.client)
+        await check_and_award_achievements(interaction.guild_id, interaction.user.id, bot=interaction.client)
 
         # Track for dragonpass quest
         _qr = await asyncio.to_thread(check_dragonpass_quests, interaction.guild_id, interaction.user.id, 'use_roulette', 1)

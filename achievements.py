@@ -155,6 +155,74 @@ async def send_quest_notification(bot: discord.Client, guild_id: int, user_id: i
         logger.error(f'send_quest_notification error: {e}')
 
 
+async def award_specific_achievement(
+    guild_id: int,
+    user_id: int,
+    ach_id: str,
+    bot: discord.Client = None,
+):
+    """Award a single achievement directly, e.g. for hidden/triggered achievements."""
+    ach_data = ACHIEVEMENTS.get(ach_id)
+    if not ach_data:
+        return
+
+    try:
+        conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        c = conn.cursor()
+        c.execute(
+            'SELECT unlocked FROM user_achievements WHERE guild_id = ? AND user_id = ? AND achievement_id = ?',
+            (guild_id, user_id, ach_id),
+        )
+        row = c.fetchone()
+        if row and row[0]:
+            conn.close()
+            return
+
+        c.execute(
+            '''INSERT OR REPLACE INTO user_achievements
+               (guild_id, user_id, achievement_id, progress, unlocked, unlocked_at)
+               VALUES (?, ?, ?, ?, 1, ?)''',
+            (guild_id, user_id, ach_id, ach_data['requirement'], int(time.time())),
+        )
+        c.execute(
+            'UPDATE users SET balance = balance + ? WHERE guild_id = ? AND user_id = ?',
+            (ach_data['reward_coins'], guild_id, user_id),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f'award_specific_achievement DB error: {e}')
+        return
+
+    if not bot:
+        return
+
+    try:
+        conn2 = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        c2 = conn2.cursor()
+        c2.execute('SELECT spawn_channel FROM guild_settings WHERE guild_id = ?', (guild_id,))
+        row = c2.fetchone()
+        conn2.close()
+        if not row or not row[0]:
+            return
+        channel = bot.get_channel(row[0])
+        if not channel:
+            return
+        guild = bot.get_guild(guild_id)
+        member = guild.get_member(user_id) if guild else None
+        username = member.display_name if member else str(user_id)
+        notify_embed = discord.Embed(title='🏆 Achievement Unlocked!', color=discord.Color.gold())
+        notify_embed.add_field(
+            name=f"{ach_data['icon']} {ach_data['name']}",
+            value=f"{ach_data['description']}\n💰 Reward: **+{ach_data['reward_coins']:,}** coins",
+            inline=False,
+        )
+        notify_embed.set_footer(text=username)
+        await channel.send(embed=notify_embed)
+    except Exception as e:
+        logger.error(f'award_specific_achievement notify error: {e}')
+
+
 async def check_and_award_achievements(
     guild_id: int,
     user_id: int,
@@ -256,6 +324,17 @@ async def check_and_award_achievements(
         total_votes = row[0] if row else 0
         vote_streak = row[1] if row else 0
 
+        # Gambling / pack stats
+        c.execute(
+            'SELECT casino_count, roulette_count, packs_opened, daily_streak FROM users WHERE guild_id = ? AND user_id = ?',
+            (guild_id, user_id),
+        )
+        row = c.fetchone()
+        casino_count = row[0] if row and row[0] else 0
+        roulette_count = row[1] if row and row[1] else 0
+        packs_opened = row[2] if row and row[2] else 0
+        daily_streak = row[3] if row and row[3] else 0
+
         # --- Build progress map ---
         achievement_progress = {
             # Catching
@@ -311,11 +390,11 @@ async def check_and_award_achievements(
             'nest_upgrade_5': nest_upgrade,
             'nest_bounties_50': nest_bounties,
             'nest_bounties_100': nest_bounties,
-            # Daily (placeholder — tracking not yet implemented)
-            'daily_7': 0,
-            'daily_14': 0,
-            'daily_30': 0,
-            'daily_100': 0,
+            # Daily streak
+            'daily_7': daily_streak,
+            'daily_14': daily_streak,
+            'daily_30': daily_streak,
+            'daily_100': daily_streak,
             # Raids
             'raid_first': raid_damage,
             'raid_damage_10k': raid_damage,
@@ -339,8 +418,29 @@ async def check_and_award_achievements(
             'vote_10': total_votes,
             'vote_50': total_votes,
             'vote_100': total_votes,
+            'vote_streak_3': vote_streak,
             'vote_streak_7': vote_streak,
             'vote_streak_30': vote_streak,
+            'vote_streak_60': vote_streak,
+            'vote_streak_100': vote_streak,
+            # Gambling
+            'gamble_first': casino_count,
+            'gamble_10': casino_count,
+            'gamble_50': casino_count,
+            'roulette_first': roulette_count,
+            'roulette_10': roulette_count,
+            'roulette_50': roulette_count,
+            # Packs
+            'open_pack_1': packs_opened,
+            'open_pack_10': packs_opened,
+            'open_pack_50': packs_opened,
+            'open_pack_100': packs_opened,
+            # Hidden achievements (triggered directly, keep 0 here so they don't auto-unlock)
+            'hidden_speed': 0,
+            'hidden_lucky': 0,
+            'hidden_midnight': 0,
+            'hidden_poor': 0,
+            'hidden_roulette_zero': 0,
         }
 
         # --- Check and award ---

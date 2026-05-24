@@ -17,7 +17,17 @@ from state import *
 import database
 from database import get_db_connection, is_player_softlocked, update_balance
 from utils import *
-from achievements import send_quest_notification
+from achievements import send_quest_notification, check_and_award_achievements
+
+
+def _increment_packs_opened(guild_id: int, user_id: int):
+    conn = get_db_connection()
+    try:
+        c = conn.cursor()
+        c.execute('UPDATE users SET packs_opened = packs_opened + 1 WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 class PacksCog(commands.Cog):
@@ -688,6 +698,10 @@ class PacksCog(commands.Cog):
                     _qr = await asyncio.to_thread(check_dragonpass_quests, self.guild_id, self.user_id, 'open_pack', 1)
                     if _qr and _qr[3]:
                         await send_quest_notification(interaction.client, self.guild_id, self.user_id, _qr[3])
+
+                    # Track pack open count + achievements
+                    await asyncio.to_thread(_increment_packs_opened, self.guild_id, self.user_id)
+                    await check_and_award_achievements(self.guild_id, self.user_id, bot=interaction.client)
 
                     # Update the original pack list message
                     await asyncio.sleep(2)

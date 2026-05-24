@@ -749,6 +749,20 @@ def init_db():
         night_vision_activator INTEGER
     )''')
 
+    # Migrate users: add daily_streak + gambling counters if missing
+    c.execute("PRAGMA table_info(users)")
+    user_columns = {row[1] for row in c.fetchall()}
+    for _col, _def in [
+        ('daily_streak', 'INTEGER DEFAULT 0'),
+        ('casino_count', 'INTEGER DEFAULT 0'),
+        ('roulette_count', 'INTEGER DEFAULT 0'),
+        ('packs_opened', 'INTEGER DEFAULT 0'),
+        ('casino_win_streak', 'INTEGER DEFAULT 0'),
+    ]:
+        if _col not in user_columns:
+            c.execute(f'ALTER TABLE users ADD COLUMN {_col} {_def}')
+    conn.commit()
+
     conn.commit()
     conn.close()
 

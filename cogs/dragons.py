@@ -75,7 +75,7 @@ class PricecheckDropdown(discord.ui.Select):
             'wooden': ('<:woodenchest:1446170002708238476>', 'Wooden Pack'),
             'stone': ('<:stonechest:1446169958265389247>', 'Stone Pack'),
             'bronze': ('<:bronzechest:1446169758599745586>', 'Bronze Pack'),
-            'silver': ('<:silverchest:1446169917996011520>', 'Silver Pack'),
+            'silver': ('<:silverdragon2:1508178716344455169>', 'Silver Pack'),
             'gold': ('<:goldchest:1446169876438978681>', 'Gold Pack'),
             'platinum': ('<:platinumchest:1446169876438978681>', 'Platinum Pack'),
             'diamond': ('<:diamondchest:1446169830720929985>', 'Diamond Pack'),
@@ -270,7 +270,7 @@ async def show_item_pricecheck(interaction: discord.Interaction, item_type: str)
         'pack_wooden': ('<:woodenchest:1446170002708238476>', 'Wooden Pack'),
         'pack_stone': ('<:stonechest:1446169958265389247>', 'Stone Pack'),
         'pack_bronze': ('<:bronzechest:1446169758599745586>', 'Bronze Pack'),
-        'pack_silver': ('<:silverchest:1446169917996011520>', 'Silver Pack'),
+        'pack_silver': ('<:silverdragon2:1508178716344455169>', 'Silver Pack'),
         'pack_gold': ('<:goldchest:1446169876438978681>', 'Gold Pack'),
         'pack_platinum': ('<:platinumchest:1446169876438978681>', 'Platinum Pack'),
         'pack_diamond': ('<:diamondchest:1446169830720929985>', 'Diamond Pack'),
@@ -1677,9 +1677,12 @@ class DragonsCog(commands.Cog):
         bounties_completed = nest_result[2] if nest_result else 0
         nest_upgrade = nest_result[3] if nest_result else 0
 
-        # Get Dragonpass level and XP
-        c.execute('SELECT level, xp FROM dragonpass WHERE guild_id = ? AND user_id = ? AND season = 1',
-                  (guild_id, user_id))
+        # Get Dragonpass level, XP and current season
+        c.execute('SELECT MAX(season) FROM dragonpass WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
+        _max_season_row = c.fetchone()
+        current_season = _max_season_row[0] if _max_season_row and _max_season_row[0] else 1
+        c.execute('SELECT level, xp FROM dragonpass WHERE guild_id = ? AND user_id = ? AND season = ?',
+                  (guild_id, user_id, current_season))
         pass_result = c.fetchone()
         pass_level = pass_result[0] if pass_result else 0
         pass_xp = pass_result[1] if pass_result else 0
@@ -1763,6 +1766,17 @@ class DragonsCog(commands.Cog):
         total_votes = vote_row[1] if vote_row else 0
         best_streak = vote_row[2] if vote_row else 0
 
+        # Daily streak
+        c.execute('SELECT daily_streak FROM users WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
+        _ds_row = c.fetchone()
+        daily_streak = _ds_row[0] if _ds_row and _ds_row[0] else 0
+
+        # Collection value (sum of dragon value * count owned)
+        c.execute('SELECT dragon_type, count FROM user_dragons WHERE guild_id = ? AND user_id = ? AND count > 0',
+                  (guild_id, user_id))
+        _owned = c.fetchall()
+        collection_value = sum(DRAGON_TYPES[dt]['value'] * cnt for dt, cnt in _owned if dt in DRAGON_TYPES)
+
         conn.close()
 
         # --- Build the 3 pages ---
@@ -1777,6 +1791,7 @@ class DragonsCog(commands.Cog):
                 name="💰 Economy",
                 value=(
                     f"Balance: **{balance:,.0f}** 🪙\n"
+                    f"Collection Value: **{collection_value:,.1f}** 🪙\n"
                     f"Total Dragons: **{total_dragons:,}**\n"
                     f"Unique Types: **{unique_dragons}/{len(DRAGON_TYPES)}**"
                 ),
@@ -1791,11 +1806,18 @@ class DragonsCog(commands.Cog):
                 ),
                 inline=True,
             )
+            _season_badge = f"\n🏆 {current_season - 1} Season(s) done" if current_season > 1 else ""
             e.add_field(
                 name="🎁 Dragonpass",
-                value=f"Level: **{pass_level}/30**\nSeason: **1**",
+                value=f"Level: **{pass_level}/30**\nSeason: **{current_season}**{_season_badge}",
                 inline=True,
             )
+            if daily_streak > 0:
+                e.add_field(
+                    name="📅 Daily Streak",
+                    value=f"**{daily_streak}** day(s)",
+                    inline=True,
+                )
             e.add_field(
                 name="✨ Alpha Dragons",
                 value=(

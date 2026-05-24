@@ -27,7 +27,7 @@ from state import (
     active_luckycharms, active_spawns, black_market_active,
     dragonscale_event_starts, last_catch_attempts, dragonpass_locks,
     premium_users, raid_boss_active, raid_boss_last_spawn, spawn_channels,
-    spawn_locks,
+    spawn_locks, lucky_hour,
 )
 from utils import (
     get_breeding_cost, get_dragon_rarity, get_spawn_channel,
@@ -80,6 +80,7 @@ class TasksCog(commands.Cog):
         self.check_dragonfest_expiry.start()
         self.check_dragonscale_expiry.start()
         self.check_lucky_charm_expiry.start()
+        self.check_lucky_hour_expiry.start()
         self.spawn_black_market.start()
         self.process_breeding_queue.start()
         self.process_adventures.start()
@@ -88,6 +89,7 @@ class TasksCog(commands.Cog):
         self.vote_reminder_task.start()
         self.vote_streak_reset_task.start()
         self.vote_reminder_deadline_task.start()
+        self.daily_streak_reminder.start()
 
     async def cog_load(self):
         """Re-register persistent ignore-reminder views for all unconfigured guilds after restart."""
@@ -110,6 +112,7 @@ class TasksCog(commands.Cog):
         self.check_dragonfest_expiry.cancel()
         self.check_dragonscale_expiry.cancel()
         self.check_lucky_charm_expiry.cancel()
+        self.check_lucky_hour_expiry.cancel()
         self.spawn_black_market.cancel()
         self.process_breeding_queue.cancel()
         self.process_adventures.cancel()
@@ -118,6 +121,7 @@ class TasksCog(commands.Cog):
         self.vote_reminder_task.cancel()
         self.vote_streak_reset_task.cancel()
         self.vote_reminder_deadline_task.cancel()
+        self.daily_streak_reminder.cancel()
 
     # ==================== CLEANUP LOCKS TASK ====================
     @tasks.loop(minutes=30)
@@ -1018,6 +1022,33 @@ class TasksCog(commands.Cog):
 
     @check_lucky_charm_expiry.before_loop
     async def before_check_lucky_charm_expiry(self):
+        await self.bot.wait_until_ready()
+
+    # ==================== LUCKY HOUR EXPIRY ====================
+    @tasks.loop(minutes=1)
+    async def check_lucky_hour_expiry(self):
+        try:
+            current_time = int(time.time())
+            if lucky_hour['active'] and lucky_hour['ends_at'] <= current_time:
+                lucky_hour['active'] = False
+                lucky_hour['ends_at'] = 0
+                expire_embed = discord.Embed(
+                    title="⭐ Lucky Hour has ended!",
+                    description="Spawn rates are back to normal. See you next time! 🐉",
+                    color=discord.Color.dark_gold()
+                )
+                for channel_id in list(spawn_channels.values()):
+                    try:
+                        ch = self.bot.get_channel(channel_id)
+                        if ch:
+                            await ch.send(embed=expire_embed)
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f"Error in check_lucky_hour_expiry: {e}")
+
+    @check_lucky_hour_expiry.before_loop
+    async def before_check_lucky_hour_expiry(self):
         await self.bot.wait_until_ready()
 
     # ==================== BLACK MARKET TASK ====================
@@ -2259,6 +2290,65 @@ class TasksCog(commands.Cog):
 
     @vote_reminder_deadline_task.before_loop
     async def before_vote_reminder_deadline_task(self):
+        await self.bot.wait_until_ready()
+
+    # ==================== DAILY STREAK REMINDER ====================
+    @tasks.loop(minutes=10)
+    async def daily_streak_reminder(self):
+        """DM users whose daily streak is about to expire (20–23h after last claim)."""
+        try:
+            now = int(time.time())
+            window_start = now - 23 * 3600
+            window_end = now - 20 * 3600
+            conn = get_db_connection()
+            try:
+                c = conn.cursor()
+                c.execute(
+                    '''SELECT guild_id, user_id, daily_streak, daily_last_claimed
+                       FROM users
+                       WHERE daily_streak > 0
+                         AND daily_last_claimed BETWEEN ? AND ?''',
+                    (window_start, window_end),
+                )
+                rows = c.fetchall()
+            finally:
+                conn.close()
+
+            already_notified = set()
+            for guild_id, user_id, streak, last_claimed in rows:
+                if user_id in already_notified:
+                    continue
+                try:
+                    user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
+                    if not user:
+                        continue
+                    expires_in = (last_claimed + 24 * 3600) - now
+                    hours_left = max(1, int(expires_in // 3600))
+                    embed = discord.Embed(
+                        title='⏰ Daily Streak Reminder!',
+                        description=(
+                            f'Your **{streak}-day** daily streak is expiring soon!\n\n'
+                            f'Claim your daily reward within **{hours_left}h** to keep it.\n'
+                            f'Use `/daily` to claim!'
+                        ),
+                        color=discord.Color.orange(),
+                    )
+                    await user.send(embed=embed)
+                    already_notified.add(user_id)
+                except discord.Forbidden:
+                    pass
+                except Exception as _e:
+                    logger.debug(f'daily_streak_reminder DM failed for {user_id}: {_e}')
+        except Exception as e:
+            logger.error(f'daily_streak_reminder error: {e}', exc_info=True)
+
+    @daily_streak_reminder.error
+    async def on_daily_streak_reminder_error(self, error):
+        logger.error(f'daily_streak_reminder crashed, restarting: {error}', exc_info=True)
+        self.daily_streak_reminder.restart()
+
+    @daily_streak_reminder.before_loop
+    async def before_daily_streak_reminder(self):
         await self.bot.wait_until_ready()
 
 

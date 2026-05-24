@@ -20,7 +20,7 @@ from config import (
     DEV_USER_ID, DRAGON_RARITY_TIERS, DRAGON_TYPES, DRAGONNEST_UPGRADES,
     ERROR_WEBHOOK_URL, LEVEL_NAMES, PACK_TYPES,
 )
-from achievements import award_trophy, check_and_award_achievements, send_quest_notification
+from achievements import award_trophy, check_and_award_achievements, send_quest_notification, award_specific_achievement
 from database import get_user, get_user_async, init_db, is_player_softlocked, update_balance, update_balance_and_check_trophies, get_db_connection, get_server_config
 from state import (
     active_dragonscales, active_dragonfest, active_luckycharms,
@@ -1802,7 +1802,16 @@ class EventsCog(commands.Cog):
                                 _conn_s.close()
                             if _unique >= len(DRAGON_TYPES):
                                 await award_trophy(self.bot, guild_id, message.author.id, 'dragon_scholar')
-    
+
+                            # Hidden achievement triggers
+                            if catch_time < 3.0:
+                                await award_specific_achievement(guild_id, message.author.id, 'hidden_speed', bot=self.bot)
+                            import datetime as _dt
+                            if _dt.datetime.utcfromtimestamp(time.time()).hour == 0:
+                                await award_specific_achievement(guild_id, message.author.id, 'hidden_midnight', bot=self.bot)
+                            # General achievement check after each catch
+                            await check_and_award_achievements(guild_id, message.author.id, bot=self.bot)
+
                             # Auto-bingo completion notification
                             if bingo_just_completed:
                                 try:
