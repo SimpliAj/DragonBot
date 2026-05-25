@@ -90,6 +90,7 @@ class TasksCog(commands.Cog):
         self.vote_streak_reset_task.start()
         self.vote_reminder_deadline_task.start()
         self.daily_streak_reminder.start()
+        self.cleanup_streak_dm_spam.start()
 
     async def cog_load(self):
         """Re-register persistent ignore-reminder views for all unconfigured guilds after restart."""
@@ -122,6 +123,7 @@ class TasksCog(commands.Cog):
         self.vote_streak_reset_task.cancel()
         self.vote_reminder_deadline_task.cancel()
         self.daily_streak_reminder.cancel()
+        self.cleanup_streak_dm_spam.cancel()
 
     # ==================== CLEANUP LOCKS TASK ====================
     @tasks.loop(minutes=30)
@@ -2371,6 +2373,54 @@ class TasksCog(commands.Cog):
 
     @daily_streak_reminder.before_loop
     async def before_daily_streak_reminder(self):
+        await self.bot.wait_until_ready()
+
+    # ==================== ONE-SHOT DM SPAM CLEANUP ====================
+    @tasks.loop(count=1)
+    async def cleanup_streak_dm_spam(self):
+        """One-shot: delete duplicate Daily Streak Reminder DMs caused by the missing sent-flag bug."""
+        await asyncio.sleep(10)  # let the bot fully connect first
+        try:
+            conn = get_db_connection()
+            try:
+                c = conn.cursor()
+                c.execute('SELECT DISTINCT user_id FROM users WHERE daily_streak > 0')
+                user_ids = [row[0] for row in c.fetchall()]
+            finally:
+                conn.close()
+
+            deleted_total = 0
+            for user_id in user_ids:
+                try:
+                    user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
+                    if not user:
+                        continue
+                    dm = await user.create_dm()
+                    msgs_to_delete = []
+                    async for msg in dm.history(limit=50):
+                        if msg.author.id == self.bot.user.id and msg.embeds:
+                            title = msg.embeds[0].title or ''
+                            if 'Daily Streak Reminder' in title:
+                                msgs_to_delete.append(msg)
+                    # Keep the most recent one, delete the rest
+                    for msg in msgs_to_delete[1:]:
+                        try:
+                            await msg.delete()
+                            deleted_total += 1
+                            await asyncio.sleep(0.5)
+                        except Exception:
+                            pass
+                except discord.Forbidden:
+                    pass
+                except Exception as _e:
+                    logger.debug(f'cleanup_streak_dm_spam failed for {user_id}: {_e}')
+
+            logger.info(f'cleanup_streak_dm_spam: deleted {deleted_total} duplicate DMs')
+        except Exception as e:
+            logger.error(f'cleanup_streak_dm_spam error: {e}', exc_info=True)
+
+    @cleanup_streak_dm_spam.before_loop
+    async def before_cleanup_streak_dm_spam(self):
         await self.bot.wait_until_ready()
 
 
