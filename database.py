@@ -758,6 +758,7 @@ def init_db():
         ('roulette_count', 'INTEGER DEFAULT 0'),
         ('packs_opened', 'INTEGER DEFAULT 0'),
         ('casino_win_streak', 'INTEGER DEFAULT 0'),
+        ('streak_reminder_sent_at', 'INTEGER DEFAULT 0'),
     ]:
         if _col not in user_columns:
             c.execute(f'ALTER TABLE users ADD COLUMN {_col} {_def}')

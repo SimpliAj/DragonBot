@@ -2295,7 +2295,7 @@ class TasksCog(commands.Cog):
     # ==================== DAILY STREAK REMINDER ====================
     @tasks.loop(minutes=10)
     async def daily_streak_reminder(self):
-        """DM users whose daily streak is about to expire (20–23h after last claim)."""
+        """DM users whose daily streak is about to expire (20–23h after last claim). Sends once per claim cycle."""
         try:
             now = int(time.time())
             window_start = now - 23 * 3600
@@ -2303,21 +2303,25 @@ class TasksCog(commands.Cog):
             conn = get_db_connection()
             try:
                 c = conn.cursor()
+                # Only fetch rows where reminder hasn't been sent yet for this cycle
+                # (streak_reminder_sent_at < daily_last_claimed means not yet sent since last claim)
                 c.execute(
                     '''SELECT guild_id, user_id, daily_streak, daily_last_claimed
                        FROM users
                        WHERE daily_streak > 0
-                         AND daily_last_claimed BETWEEN ? AND ?''',
+                         AND daily_last_claimed BETWEEN ? AND ?
+                         AND (streak_reminder_sent_at IS NULL OR streak_reminder_sent_at < daily_last_claimed)''',
                     (window_start, window_end),
                 )
                 rows = c.fetchall()
             finally:
                 conn.close()
 
-            already_notified = set()
+            seen_users = set()
             for guild_id, user_id, streak, last_claimed in rows:
-                if user_id in already_notified:
+                if user_id in seen_users:
                     continue
+                seen_users.add(user_id)
                 try:
                     user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
                     if not user:
@@ -2334,9 +2338,27 @@ class TasksCog(commands.Cog):
                         color=discord.Color.orange(),
                     )
                     await user.send(embed=embed)
-                    already_notified.add(user_id)
+                    # Mark reminder as sent for this cycle
+                    conn2 = get_db_connection()
+                    try:
+                        c2 = conn2.cursor()
+                        c2.execute(
+                            'UPDATE users SET streak_reminder_sent_at = ? WHERE user_id = ?',
+                            (now, user_id),
+                        )
+                        conn2.commit()
+                    finally:
+                        conn2.close()
                 except discord.Forbidden:
-                    pass
+                    # Can't DM user — mark anyway so we don't retry every 10min
+                    try:
+                        conn3 = get_db_connection()
+                        c3 = conn3.cursor()
+                        c3.execute('UPDATE users SET streak_reminder_sent_at = ? WHERE user_id = ?', (now, user_id))
+                        conn3.commit()
+                        conn3.close()
+                    except Exception:
+                        pass
                 except Exception as _e:
                     logger.debug(f'daily_streak_reminder DM failed for {user_id}: {_e}')
         except Exception as e:
