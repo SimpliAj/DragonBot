@@ -1104,6 +1104,9 @@ class EventsCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message):
+        if not message.guild:
+            return  # ignore DMs
+
         # Special check for Cat Bot (ID: 966695034340663367) posting in dragon channels
         CAT_BOT_ID = 966695034340663367
 
