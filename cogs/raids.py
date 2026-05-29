@@ -699,7 +699,7 @@ class RaidAttackView(discord.ui.View):
                         value="All raid tiers have been defeated! Wild dragons will now spawn normally.",
                         inline=False
                     )
-                    c_a.execute('DELETE FROM raid_bosses WHERE guild_id = ? ORDER BY expires_at DESC LIMIT 1', (btn_interaction.guild_id,))
+                    c_a.execute('DELETE FROM raid_bosses WHERE guild_id = ?', (btn_interaction.guild_id,))
                     c_a.execute('DELETE FROM raid_damage WHERE guild_id = ?', (btn_interaction.guild_id,))
                     if btn_interaction.guild_id in raid_boss_active:
                         del raid_boss_active[btn_interaction.guild_id]
@@ -738,7 +738,7 @@ class RaidAttackView(discord.ui.View):
                                         value="All raid tiers have been defeated! Wild dragons will now spawn normally.",
                                         inline=False
                                     )
-                                    c_a.execute('DELETE FROM raid_bosses WHERE guild_id = ? ORDER BY expires_at DESC LIMIT 1', (btn_interaction.guild_id,))
+                                    c_a.execute('DELETE FROM raid_bosses WHERE guild_id = ?', (btn_interaction.guild_id,))
                                     if btn_interaction.guild_id in raid_boss_active:
                                         del raid_boss_active[btn_interaction.guild_id]
                                 else:
@@ -1611,14 +1611,6 @@ class RaidsCog(commands.Cog):
         guild_id = interaction.guild_id
         user_id = interaction.user.id
         current_time = int(time.time())
-
-        from database import get_server_config
-        cfg = get_server_config(guild_id)
-        if not cfg['raids_enabled']:
-            await interaction.response.send_message(
-                "❌ Raids are not enabled on this server. Ask an admin to enable them via `/serverconfig`.",
-                ephemeral=True)
-            return
 
         conn = get_db_connection(120.0)
         c = conn.cursor()
