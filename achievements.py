@@ -4,7 +4,7 @@ import time
 import logging
 import discord
 
-from config import ACHIEVEMENTS, DRAGON_RARITY_TIERS, EARNED_TROPHIES, TROPHY_EMOJIS, DRAGONPASS_QUEST_REWARDS
+from config import ACHIEVEMENTS, DRAGON_RARITY_TIERS, EARNED_TROPHIES, TROPHY_EMOJIS, DRAGONPASS_QUEST_REWARDS, DB_BUSY_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +17,8 @@ async def award_trophy(bot: discord.Client, guild_id: int, user_id: int, trophy_
 
     try:
         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute(f'PRAGMA busy_timeout={DB_BUSY_TIMEOUT}')
         c = conn.cursor()
         c.execute(
             'SELECT 1 FROM user_trophies WHERE guild_id = ? AND user_id = ? AND trophy_id = ?',
@@ -73,6 +75,8 @@ async def send_quest_notification(bot: discord.Client, guild_id: int, user_id: i
 
     try:
         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute(f'PRAGMA busy_timeout={DB_BUSY_TIMEOUT}')
         c = conn.cursor()
         c.execute('SELECT spawn_channel FROM guild_settings WHERE guild_id = ?', (guild_id,))
         row = c.fetchone()
@@ -168,6 +172,8 @@ async def award_specific_achievement(
 
     try:
         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute(f'PRAGMA busy_timeout={DB_BUSY_TIMEOUT}')
         c = conn.cursor()
         c.execute(
             'SELECT unlocked FROM user_achievements WHERE guild_id = ? AND user_id = ? AND achievement_id = ?',
@@ -238,6 +244,8 @@ async def check_and_award_achievements(
     """
     try:
         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute(f'PRAGMA busy_timeout={DB_BUSY_TIMEOUT}')
         c = conn.cursor()
 
         # --- Gather stats ---

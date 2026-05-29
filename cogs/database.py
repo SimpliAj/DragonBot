@@ -229,7 +229,7 @@ def init_db():
         PRIMARY KEY (guild_id, user_id, alpha_id)
     )''')
 
-    # Spawn configuration per server
+    # Spawn configuration per server (last_spawn_time only; spawn_channel moved to guild_settings)
     c.execute('''CREATE TABLE IF NOT EXISTS spawn_config (
         guild_id INTEGER PRIMARY KEY,
         spawn_channel_id INTEGER,
@@ -348,17 +348,6 @@ def init_db():
         guild_id INTEGER PRIMARY KEY,
         spawn_channel INTEGER
     )''')
-
-    try:
-        c.execute('SELECT guild_id, spawn_channel_id FROM spawn_config')
-        old_configs = c.fetchall()
-        for guild_id, channel_id in old_configs:
-            c.execute('INSERT OR IGNORE INTO guild_settings (guild_id, spawn_channel) VALUES (?, ?)',
-                     (guild_id, channel_id))
-        if old_configs:
-            print(f"Migrated {len(old_configs)} spawn channels from spawn_config to guild_settings")
-    except sqlite3.OperationalError:
-        pass
 
     conn.commit()
 
@@ -750,6 +739,8 @@ def init_db():
 
     # Load spawn channels into memory
     conn = sqlite3.connect(DB_PATH, timeout=120.0)
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute(f'PRAGMA busy_timeout={DB_BUSY_TIMEOUT}')
     c = conn.cursor()
     c.execute('SELECT guild_id, spawn_channel FROM guild_settings WHERE spawn_channel IS NOT NULL')
     for guild_id, channel_id in c.fetchall():
@@ -780,6 +771,8 @@ def init_db():
 def migrate_database():
     """Run any necessary database schema migrations."""
     conn = sqlite3.connect(DB_PATH, timeout=120.0)
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute(f'PRAGMA busy_timeout={DB_BUSY_TIMEOUT}')
     c = conn.cursor()
 
     dragon_nest_columns = {
@@ -979,27 +972,33 @@ _SERVER_CONFIG_DEFAULTS = {
 
 def get_server_config(guild_id: int) -> dict:
     """Return server config dict for a guild. Falls back to defaults."""
-    try:
-        conn = sqlite3.connect(DB_PATH, timeout=DB_TIMEOUT_SHORT)
-        conn.execute('PRAGMA journal_mode=WAL')
-        c = conn.cursor()
-        c.execute('''SELECT raids_enabled, raid_times, blackmarket_enabled,
-                            blackmarket_interval_hours, blackmarket_max_per_day
-                     FROM guild_settings WHERE guild_id = ?''', (guild_id,))
-        row = c.fetchone()
-        conn.close()
-        if not row:
-            return dict(_SERVER_CONFIG_DEFAULTS)
-        import json as _json
-        return {
-            'raids_enabled': row[0] if row[0] is not None else 0,
-            'raid_times': _json.loads(row[1]) if row[1] else [8, 16, 20],
-            'blackmarket_enabled': row[2] if row[2] is not None else 0,
-            'blackmarket_interval_hours': row[3] if row[3] is not None else 4,
-            'blackmarket_max_per_day': row[4] if row[4] is not None else 6,
-        }
-    except Exception:
-        return dict(_SERVER_CONFIG_DEFAULTS)
+    for attempt in range(RETRY_MAX_ATTEMPTS):
+        try:
+            conn = sqlite3.connect(DB_PATH, timeout=DB_TIMEOUT_SHORT)
+            conn.execute('PRAGMA journal_mode=WAL')
+            c = conn.cursor()
+            c.execute('''SELECT raids_enabled, raid_times, blackmarket_enabled,
+                                blackmarket_interval_hours, blackmarket_max_per_day
+                         FROM guild_settings WHERE guild_id = ?''', (guild_id,))
+            row = c.fetchone()
+            conn.close()
+            if not row:
+                return dict(_SERVER_CONFIG_DEFAULTS)
+            import json as _json
+            return {
+                'raids_enabled': row[0] if row[0] is not None else 0,
+                'raid_times': _json.loads(row[1]) if row[1] else [8, 16, 20],
+                'blackmarket_enabled': row[2] if row[2] is not None else 0,
+                'blackmarket_interval_hours': row[3] if row[3] is not None else 4,
+                'blackmarket_max_per_day': row[4] if row[4] is not None else 6,
+            }
+        except sqlite3.OperationalError:
+            if attempt < RETRY_MAX_ATTEMPTS - 1:
+                time.sleep(RETRY_DELAY)
+            continue
+        except Exception:
+            break
+    return dict(_SERVER_CONFIG_DEFAULTS)
 
 
 def update_server_config(guild_id: int, key: str, value) -> bool:

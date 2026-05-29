@@ -17,6 +17,7 @@ from config import (
     BLACK_MARKET_DURATION, BLACK_MARKET_ITEMS, BLACK_MARKET_SPAWN_INTERVAL,
     DRAGON_RARITY_TIERS, DRAGON_TYPES, DRAGONNEST_UPGRADES, LEVEL_NAMES,
     RAID_DURATION_HOURS, RAID_SPAWN_TIMES, normalize_dragon_type,
+    DB_BUSY_TIMEOUT,
 )
 from database import get_db_connection
 from state import (
@@ -130,6 +131,8 @@ class TasksCog(commands.Cog):
                             already_spawned_this_hour = True
 
                     conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                    conn.execute('PRAGMA journal_mode=WAL')
+                    conn.execute(f'PRAGMA busy_timeout={DB_BUSY_TIMEOUT}')
                     c = conn.cursor()
 
                     # === SPAWN LOGIC ===
@@ -436,6 +439,8 @@ class TasksCog(commands.Cog):
             conn = None
             try:
                 conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                conn.execute('PRAGMA journal_mode=WAL')
+                conn.execute(f'PRAGMA busy_timeout={DB_BUSY_TIMEOUT}')
                 c = conn.cursor()
                 # Check spawn_config for last_spawn_time (backward compatibility)
                 c.execute('SELECT last_spawn_time FROM spawn_config WHERE guild_id = ?', (guild_id,))
@@ -521,6 +526,8 @@ class TasksCog(commands.Cog):
         conn = None
         try:
             conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+            conn.execute('PRAGMA journal_mode=WAL')
+            conn.execute(f'PRAGMA busy_timeout={DB_BUSY_TIMEOUT}')
             c = conn.cursor()
 
             current_time = int(time.time())
@@ -645,6 +652,8 @@ class TasksCog(commands.Cog):
                 return
 
             conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+            conn.execute('PRAGMA journal_mode=WAL')
+            conn.execute(f'PRAGMA busy_timeout={DB_BUSY_TIMEOUT}')
             c = conn.cursor()
 
             for guild_id, data in expired_guilds:
@@ -768,6 +777,8 @@ class TasksCog(commands.Cog):
                 return
 
             conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+            conn.execute('PRAGMA journal_mode=WAL')
+            conn.execute(f'PRAGMA busy_timeout={DB_BUSY_TIMEOUT}')
             c = conn.cursor()
 
             for guild_id in expired_guilds:
@@ -1151,6 +1162,8 @@ class TasksCog(commands.Cog):
 
                                     # Process purchase
                                     conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+                                    conn.execute('PRAGMA journal_mode=WAL')
+                                    conn.execute(f'PRAGMA busy_timeout={DB_BUSY_TIMEOUT}')
                                     c = conn.cursor()
 
                                     # Deduct balance
@@ -1299,6 +1312,8 @@ class TasksCog(commands.Cog):
         current_time = int(time.time())
 
         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute(f'PRAGMA busy_timeout={DB_BUSY_TIMEOUT}')
         c = conn.cursor()
 
         # Get ALL pending breedings (not filtered by scheduled_for anymore)
@@ -1665,6 +1680,8 @@ class TasksCog(commands.Cog):
         dms_to_send = []  # Collect DMs to send after database operations
 
         conn = sqlite3.connect('dragon_bot.db', timeout=120.0)
+        conn.execute('PRAGMA journal_mode=WAL')
+        conn.execute(f'PRAGMA busy_timeout={DB_BUSY_TIMEOUT}')
         c = conn.cursor()
 
         # Get all completed adventures that haven't been claimed

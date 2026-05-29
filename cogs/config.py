@@ -15,12 +15,12 @@ DRAGONPASS_QUEST_REWARDS = os.getenv('DRAGONPASS_QUEST_REWARDS', 'true').lower()
 
 # ==================== GLOBAL CONSTANTS ====================
 DB_PATH = 'dragon_bot.db'
-DB_TIMEOUT_SHORT = 5.0
-DB_TIMEOUT_MEDIUM = 10.0
-DB_TIMEOUT_LONG = 15.0
-DB_BUSY_TIMEOUT = 5000
+DB_TIMEOUT_SHORT = 30.0
+DB_TIMEOUT_MEDIUM = 60.0
+DB_TIMEOUT_LONG = 120.0
+DB_BUSY_TIMEOUT = 30000
 RETRY_MAX_ATTEMPTS = 5
-RETRY_DELAY = 0.2
+RETRY_DELAY = 0.5
 
 DRAGON_NEST_UPGRADE_COST = 500_000_000
 DAILY_REWARD = 500
@@ -73,34 +73,34 @@ DRAGON_TYPE_MAPPING = {
 # ==================== DRAGON TYPES ====================
 DRAGON_TYPES = {
     # Common Elements
-    'stone': {'name': 'Baby Fire', 'emoji': '<:babyfiredragon:1446205107472564346>', 'image': 'https://i.imgur.com/v09t89A.png', 'spawn_chance': 27.75, 'value': 4.11, 'catch_weight': 1260},
-    'ember': {'name': 'Baby Forest', 'emoji': '<:babyforrestdragon:1446205128167260291>', 'image': 'https://i.imgur.com/CZaYIRJ.png', 'spawn_chance': 20.80, 'value': 5.48, 'catch_weight': 942},
-    'frost': {'name': 'Baby Honey', 'emoji': '<:babyhoneydragon:1446205149264478399>', 'image': 'https://i.imgur.com/b1EZm1Q.png', 'spawn_chance': 13.87, 'value': 8.22, 'catch_weight': 628},
+    'stone': {'name': 'Baby Fire', 'emoji': '<:babyfiredragon:1446205107472564346>', 'image': 'https://i.imgur.com/v09t89A.png', 'spawn_chance': 22.02, 'value': 4.11, 'catch_weight': 1310},
+    'ember': {'name': 'Baby Forest', 'emoji': '<:babyforrestdragon:1446205128167260291>', 'image': 'https://i.imgur.com/CZaYIRJ.png', 'spawn_chance': 16.47, 'value': 5.48, 'catch_weight': 980},
+    'frost': {'name': 'Baby Honey', 'emoji': '<:babyhoneydragon:1446205149264478399>', 'image': 'https://i.imgur.com/b1EZm1Q.png', 'spawn_chance': 11.43, 'value': 8.22, 'catch_weight': 680},
     # Uncommon Elements
-    'storm': {'name': 'Amethyst', 'emoji': '<:amethyst:1446206754139410545>', 'image': 'https://i.imgur.com/c96bACU.png', 'spawn_chance': 9.25, 'value': 11.74, 'catch_weight': 419},
-    'ocean': {'name': 'Chubby', 'emoji': '<:chubbydragon:1446206779129335858>', 'image': 'https://i.imgur.com/6LMijx6.png', 'spawn_chance': 7.28, 'value': 14.94, 'catch_weight': 329},
-    'nature': {'name': 'Sky', 'emoji': '<:skydragon:1446206801539371108>', 'image': 'https://i.imgur.com/0QGx7vH.png', 'spawn_chance': 6.08, 'value': 17.86, 'catch_weight': 275},
+    'storm': {'name': 'Amethyst', 'emoji': '<:amethyst:1446206754139410545>', 'image': 'https://i.imgur.com/c96bACU.png', 'spawn_chance': 9.08, 'value': 11.74, 'catch_weight': 540},
+    'ocean': {'name': 'Chubby', 'emoji': '<:chubbydragon:1446206779129335858>', 'image': 'https://i.imgur.com/6LMijx6.png', 'spawn_chance': 8.40, 'value': 14.94, 'catch_weight': 500},
+    'nature': {'name': 'Sky', 'emoji': '<:skydragon:1446206801539371108>', 'image': 'https://i.imgur.com/0QGx7vH.png', 'spawn_chance': 7.56, 'value': 17.86, 'catch_weight': 450},
     # Rare Gems
-    'amethyst': {'name': 'Friendly', 'emoji': '<:friendly:1446208307080597504>', 'image': 'https://i.imgur.com/Qb5fixC.png', 'spawn_chance': 5.28, 'value': 20.54, 'catch_weight': 450},
-    'topaz': {'name': 'Candy', 'emoji': '<:candyd:1446215122228871310>', 'image': 'https://i.imgur.com/7VXLd3F.png', 'spawn_chance': 4.62, 'value': 23.47, 'catch_weight': 390},
-    'ruby': {'name': 'Mossy', 'emoji': '<:mossyd:1446215099411992828>', 'image': 'https://i.imgur.com/2jtF596.png', 'spawn_chance': 3.97, 'value': 27.39, 'catch_weight': 330},
-    'sapphire': {'name': 'Chinese', 'emoji': '<:cndrag:1446215073583333511>', 'image': 'https://i.imgur.com/FTd3yyD.png', 'spawn_chance': 3.31, 'value': 32.86, 'catch_weight': 275},
+    'amethyst': {'name': 'Friendly', 'emoji': '<:friendly:1446208307080597504>', 'image': 'https://i.imgur.com/Qb5fixC.png', 'spawn_chance': 3.53, 'value': 20.54, 'catch_weight': 210},
+    'topaz': {'name': 'Candy', 'emoji': '<:candyd:1446215122228871310>', 'image': 'https://i.imgur.com/7VXLd3F.png', 'spawn_chance': 3.28, 'value': 23.47, 'catch_weight': 195},
+    'ruby': {'name': 'Mossy', 'emoji': '<:mossyd:1446215099411992828>', 'image': 'https://i.imgur.com/2jtF596.png', 'spawn_chance': 3.11, 'value': 27.39, 'catch_weight': 185},
+    'sapphire': {'name': 'Chinese', 'emoji': '<:cndrag:1446215073583333511>', 'image': 'https://i.imgur.com/FTd3yyD.png', 'spawn_chance': 3.03, 'value': 32.86, 'catch_weight': 180},
     # Epic Metals
-    'iron': {'name': 'UwU', 'emoji': '<:uwu:1446211083017912473>', 'image': 'https://i.imgur.com/AlYgTEA.png', 'spawn_chance': 2.43, 'value': 41.08, 'catch_weight': 200},
-    'silver': {'name': 'Mew', 'emoji': '<:mewdragon:1446211865956061245>', 'image': 'https://i.imgur.com/8QBL13V.png', 'spawn_chance': 1.94, 'value': 51.35, 'catch_weight': 160},
+    'iron': {'name': 'UwU', 'emoji': '<:uwu:1446211083017912473>', 'image': 'https://i.imgur.com/AlYgTEA.png', 'spawn_chance': 2.86, 'value': 41.08, 'catch_weight': 170},
+    'silver': {'name': 'Mew', 'emoji': '<:mewdragon:1446211865956061245>', 'image': 'https://i.imgur.com/8QBL13V.png', 'spawn_chance': 2.18, 'value': 51.35, 'catch_weight': 130},
     # Legendary Gems
-    'emerald': {'name': 'E-Girl', 'emoji': '<:egirl:1446210298045403340>', 'image': 'https://i.imgur.com/5UGlWW8.png', 'spawn_chance': 1.10, 'value': 82.16, 'catch_weight': 110},
-    'diamond': {'name': 'Hungry', 'emoji': '<:hungry:1446210325014777867>', 'image': 'https://i.imgur.com/efhEn4V.png', 'spawn_chance': 0.77, 'value': 117.37, 'catch_weight': 77},
-    'obsidian': {'name': 'Nogard', 'emoji': '<:nogard:1446210350155567174>', 'image': 'https://i.imgur.com/KEYKXmj.png', 'spawn_chance': 0.55, 'value': 164.32, 'catch_weight': 55},
+    'emerald': {'name': 'E-Girl', 'emoji': '<:egirl:1446210298045403340>', 'image': 'https://i.imgur.com/5UGlWW8.png', 'spawn_chance': 1.68, 'value': 82.16, 'catch_weight': 100},
+    'diamond': {'name': 'Hungry', 'emoji': '<:hungry:1446210325014777867>', 'image': 'https://i.imgur.com/efhEn4V.png', 'spawn_chance': 1.34, 'value': 117.37, 'catch_weight': 80},
+    'obsidian': {'name': 'Nogard', 'emoji': '<:nogard:1446210350155567174>', 'image': 'https://i.imgur.com/KEYKXmj.png', 'spawn_chance': 1.01, 'value': 164.32, 'catch_weight': 60},
     # Mythic Precious
-    'gold': {'name': 'Ember', 'emoji': '<:emberd:1446216735731617904>', 'image': 'https://i.imgur.com/ZpyOgLf.png', 'spawn_chance': 0.31, 'value': 205.4, 'catch_weight': 14},
-    'platinum': {'name': 'Emerald', 'emoji': '<:emeraldd:1446217302105264218>', 'image': 'https://i.imgur.com/t8v7K7n.png', 'spawn_chance': 0.25, 'value': 273.87, 'catch_weight': 11},
-    'crystal': {'name': 'Shadow', 'emoji': '<:shadwod:1446217327162167477>', 'image': 'https://i.imgur.com/ujpeJpg.png', 'spawn_chance': 0.19, 'value': 410.8, 'catch_weight': 9},
+    'gold': {'name': 'Ember', 'emoji': '<:emberd:1446216735731617904>', 'image': 'https://i.imgur.com/ZpyOgLf.png', 'spawn_chance': 0.76, 'value': 205.4, 'catch_weight': 45},
+    'platinum': {'name': 'Emerald', 'emoji': '<:emeraldd:1446217302105264218>', 'image': 'https://i.imgur.com/t8v7K7n.png', 'spawn_chance': 0.67, 'value': 273.87, 'catch_weight': 40},
+    'crystal': {'name': 'Shadow', 'emoji': '<:shadwod:1446217327162167477>', 'image': 'https://i.imgur.com/ujpeJpg.png', 'spawn_chance': 0.59, 'value': 410.8, 'catch_weight': 35},
     # Ultra Rare
-    'celestial': {'name': 'Lightfury', 'emoji': '<:lightfury:1446213988949168168>', 'image': 'https://i.imgur.com/FAK8Y2E.png', 'spawn_chance': 0.11, 'value': 513.5, 'catch_weight': 5},
-    'void': {'name': 'Toothless', 'emoji': '<:toothless:1446213965326844015>', 'image': 'https://i.imgur.com/STFG0fg.png', 'spawn_chance': 0.09, 'value': 821.6, 'catch_weight': 4},
-    'cosmic': {'name': 'Tagschatten', 'emoji': '<:tagschatten:1446213943239512147>', 'image': 'https://i.imgur.com/5MQz8j3.png', 'spawn_chance': 0.06, 'value': 1369.33, 'catch_weight': 3},
-    'primordial': {'name': 'Ohnezahn', 'emoji': '<:ohnezahn:1446213919654940805>', 'image': 'https://i.imgur.com/MFaIjiM.png', 'spawn_chance': 0.04, 'value': 2054, 'catch_weight': 2}
+    'celestial': {'name': 'Lightfury', 'emoji': '<:lightfury:1446213988949168168>', 'image': 'https://i.imgur.com/FAK8Y2E.png', 'spawn_chance': 0.34, 'value': 513.5, 'catch_weight': 20},
+    'void': {'name': 'Toothless', 'emoji': '<:toothless:1446213965326844015>', 'image': 'https://i.imgur.com/STFG0fg.png', 'spawn_chance': 0.27, 'value': 821.6, 'catch_weight': 16},
+    'cosmic': {'name': 'Tagschatten', 'emoji': '<:tagschatten:1446213943239512147>', 'image': 'https://i.imgur.com/5MQz8j3.png', 'spawn_chance': 0.24, 'value': 1369.33, 'catch_weight': 14},
+    'primordial': {'name': 'Ohnezahn', 'emoji': '<:ohnezahn:1446213919654940805>', 'image': 'https://i.imgur.com/MFaIjiM.png', 'spawn_chance': 0.17, 'value': 2054, 'catch_weight': 10}
 }
 
 # ==================== LEVEL SYSTEM ====================
@@ -821,7 +821,7 @@ PACK_TYPES = {
     'wooden':   {'name': 'Wooden Pack',   'emoji': '<:woodenchest:1446170002708238476>'},
     'stone':    {'name': 'Stone Pack',    'emoji': '<:stonechest:1446169958265389247>'},
     'bronze':   {'name': 'Bronze Pack',   'emoji': '<:bronzechest:1446169758599745586>'},
-    'silver':   {'name': 'Silver Pack',   'emoji': '<:silverchest:1446169917996011520>'},
+    'silver':   {'name': 'Silver Pack',   'emoji': '<:silverdragon2:1508178716344455169>'},
     'gold':     {'name': 'Gold Pack',     'emoji': '<:goldchest:1446169876438978681>'},
     'platinum': {'name': 'Platinum Pack', 'emoji': '<:platinumchest:1446169876438978681>'},
     'diamond':  {'name': 'Diamond Pack',  'emoji': '<:diamondchest:1446169830720929985>'},

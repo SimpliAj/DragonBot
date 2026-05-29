@@ -230,7 +230,7 @@ def init_db():
         PRIMARY KEY (guild_id, user_id, alpha_id)
     )''')
 
-    # Spawn configuration per server
+    # Spawn configuration per server (last_spawn_time only; spawn_channel moved to guild_settings)
     c.execute('''CREATE TABLE IF NOT EXISTS spawn_config (
         guild_id INTEGER PRIMARY KEY,
         spawn_channel_id INTEGER,
@@ -349,17 +349,6 @@ def init_db():
         guild_id INTEGER PRIMARY KEY,
         spawn_channel INTEGER
     )''')
-
-    try:
-        c.execute('SELECT guild_id, spawn_channel_id FROM spawn_config')
-        old_configs = c.fetchall()
-        for guild_id, channel_id in old_configs:
-            c.execute('INSERT OR IGNORE INTO guild_settings (guild_id, spawn_channel) VALUES (?, ?)',
-                     (guild_id, channel_id))
-        if old_configs:
-            print(f"Migrated {len(old_configs)} spawn channels from spawn_config to guild_settings")
-    except sqlite3.OperationalError:
-        pass
 
     conn.commit()
 
