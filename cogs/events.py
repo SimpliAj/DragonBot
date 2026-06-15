@@ -1233,7 +1233,7 @@ class EventsCog(commands.Cog):
                     is_typo = True
 
         _cfg = get_server_config(guild_id)
-        if is_typo and _cfg.get('chat_responses_enabled', 1):
+        if is_typo and _cfg.get('chat_responses_enabled', 1) and guild_id in spawn_channels and spawn_channels[guild_id] == message.channel.id:
             mock_messages = [
                 f"🤡 Did you just try to type 'dragon'? You wrote '{message.content}' LMAO",
                 f"😂 '{message.content}'??? It's literally just 'dragon' bro",
