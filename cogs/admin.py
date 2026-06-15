@@ -1925,6 +1925,17 @@ class ServerConfigView(discord.ui.View):
             view=ServerConfigView(self.guild_id),
         )
 
+    @discord.ui.button(label="Toggle Chat Responses", style=discord.ButtonStyle.secondary, row=2)
+    async def toggle_chat_responses(self, interaction: discord.Interaction, button: discord.ui.Button):
+        from database import get_server_config, update_server_config
+        cfg = get_server_config(self.guild_id)
+        new_val = 0 if cfg['chat_responses_enabled'] else 1
+        update_server_config(self.guild_id, 'chat_responses_enabled', new_val)
+        await interaction.response.edit_message(
+            embed=_build_config_embed(self.guild_id),
+            view=ServerConfigView(self.guild_id),
+        )
+
     @discord.ui.button(label="Black Market Interval", style=discord.ButtonStyle.secondary, row=2)
     async def bm_interval(self, interaction: discord.Interaction, button: discord.ui.Button):
         from database import get_server_config
@@ -1962,6 +1973,12 @@ def _build_config_embed(guild_id: int) -> discord.Embed:
     embed.add_field(
         name="🚫 Anti-Double Catch",
         value=f"Status: **{adc_status}**\nSame user can't catch twice in a row\n*(Disabled during DragonFest)*",
+        inline=False,
+    )
+    chat_status = "✅ Enabled" if cfg['chat_responses_enabled'] else "❌ Disabled"
+    embed.add_field(
+        name="💬 Chat Responses",
+        value=f"Status: **{chat_status}**\nTypo mocking & cat jokes in dragon channel",
         inline=False,
     )
     embed.set_footer(text="Raids and Black Market are disabled by default.")

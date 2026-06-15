@@ -755,6 +755,7 @@ def init_db():
         ('blackmarket_enabled', 'INTEGER DEFAULT 0'),
         ('blackmarket_interval_hours', 'INTEGER DEFAULT 4'),
         ('blackmarket_max_per_day', 'INTEGER DEFAULT 6'),
+        ('chat_responses_enabled', 'INTEGER DEFAULT 1'),
     ]
     for col_name, col_def in new_columns:
         if col_name not in gs_columns:
@@ -968,6 +969,7 @@ _SERVER_CONFIG_DEFAULTS = {
     'blackmarket_enabled': 0,
     'blackmarket_interval_hours': 4,
     'blackmarket_max_per_day': 6,
+    'chat_responses_enabled': 1,
 }
 
 def get_server_config(guild_id: int) -> dict:
@@ -978,7 +980,8 @@ def get_server_config(guild_id: int) -> dict:
             conn.execute('PRAGMA journal_mode=WAL')
             c = conn.cursor()
             c.execute('''SELECT raids_enabled, raid_times, blackmarket_enabled,
-                                blackmarket_interval_hours, blackmarket_max_per_day
+                                blackmarket_interval_hours, blackmarket_max_per_day,
+                                chat_responses_enabled
                          FROM guild_settings WHERE guild_id = ?''', (guild_id,))
             row = c.fetchone()
             conn.close()
@@ -991,6 +994,7 @@ def get_server_config(guild_id: int) -> dict:
                 'blackmarket_enabled': row[2] if row[2] is not None else 0,
                 'blackmarket_interval_hours': row[3] if row[3] is not None else 4,
                 'blackmarket_max_per_day': row[4] if row[4] is not None else 6,
+                'chat_responses_enabled': row[5] if row[5] is not None else 1,
             }
         except sqlite3.OperationalError:
             if attempt < RETRY_MAX_ATTEMPTS - 1:

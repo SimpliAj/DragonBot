@@ -1232,7 +1232,8 @@ class EventsCog(commands.Cog):
                 if len(dragon_chars & msg_chars) >= 5:
                     is_typo = True
 
-        if is_typo:
+        _cfg = get_server_config(guild_id)
+        if is_typo and _cfg.get('chat_responses_enabled', 1):
             mock_messages = [
                 f"🤡 Did you just try to type 'dragon'? You wrote '{message.content}' LMAO",
                 f"😂 '{message.content}'??? It's literally just 'dragon' bro",
@@ -1251,7 +1252,7 @@ class EventsCog(commands.Cog):
             return
 
         # Check for "cat" in dragon channel - mock the user
-        if message.content.lower().strip() == 'cat':
+        if message.content.lower().strip() == 'cat' and _cfg.get('chat_responses_enabled', 1):
             if guild_id in spawn_channels and spawn_channels[guild_id] == message.channel.id:
                 cat_mocks = [
                     f"🐉 {message.author.mention} just said 'cat' in the DRAGON channel??? 💀\nYou lost? This is dragon territory! 🐱❌",
