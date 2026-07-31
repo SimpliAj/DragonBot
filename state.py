@@ -61,6 +61,9 @@ raid_boss_active = {}           # {guild_id: bool}
 # Active breeding sessions (prevents duplicate breed calls)
 active_breeding_sessions = {}   # {(guild_id, user_id): timestamp}
 
+# Lucky Hour event (global, all servers)
+lucky_hour = {'active': False, 'ends_at': 0}  # ends_at = unix timestamp
+
 # Ritual state
 ritual_active = {}              # {guild_id: bool}
 
