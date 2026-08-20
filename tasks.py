@@ -463,6 +463,40 @@ class TasksCog(commands.Cog):
                                   (current_time, guild_id))
                         conn.commit()
 
+                # Get per-guild event spawn interval config
+                c.execute('SELECT event_spawn_interval_min, event_spawn_interval_max FROM guild_settings WHERE guild_id = ?',
+                          (guild_id,))
+                event_interval_row = c.fetchone()
+                if event_interval_row and event_interval_row[0] is not None:
+                    event_spawn_min = event_interval_row[0]
+                else:
+                    event_spawn_min = 2
+                if event_interval_row and event_interval_row[1] is not None:
+                    event_spawn_max = event_interval_row[1]
+                else:
+                    event_spawn_max = 5
+                event_spawn_min = max(1, int(event_spawn_min))
+                event_spawn_max = max(1, int(event_spawn_max))
+                if event_spawn_min > event_spawn_max:
+                    event_spawn_min, event_spawn_max = event_spawn_max, event_spawn_min
+
+                # Get per-guild normal-mode spawn interval config
+                c.execute('SELECT normal_spawn_interval_min, normal_spawn_interval_max FROM guild_settings WHERE guild_id = ?',
+                          (guild_id,))
+                normal_interval_row = c.fetchone()
+                if normal_interval_row and normal_interval_row[0] is not None:
+                    normal_spawn_min = normal_interval_row[0]
+                else:
+                    normal_spawn_min = 180
+                if normal_interval_row and normal_interval_row[1] is not None:
+                    normal_spawn_max = normal_interval_row[1]
+                else:
+                    normal_spawn_max = 900
+                normal_spawn_min = max(30, int(normal_spawn_min))
+                normal_spawn_max = max(30, int(normal_spawn_max))
+                if normal_spawn_min > normal_spawn_max:
+                    normal_spawn_min, normal_spawn_max = normal_spawn_max, normal_spawn_min
+
                 # Check if dragonscale/dragonfest/premium is active (shorter interval: 30-90 seconds)
                 has_active_dragonscale = guild_id in active_dragonscales and active_dragonscales[guild_id] > current_time
 
@@ -476,11 +510,11 @@ class TasksCog(commands.Cog):
                 has_premium = guild_id in premium_users and any(end_time > current_time for end_time in premium_users[guild_id].values())
 
                 if has_active_dragonscale or has_dragonfest or has_premium:
-                    # During events: INSTANT spawns (max 2-5 seconds after any spawn)
-                    spawn_interval = random.randint(2, 5)  # 2-5 seconds during events
+                    # During events: INSTANT spawns (per-guild configurable interval)
+                    spawn_interval = random.randint(event_spawn_min, event_spawn_max)
                 else:
-                    # Normal mode: 3-15 minutes
-                    spawn_interval = random.randint(180, 900)  # 3-15 minutes normal
+                    # Normal mode (per-guild configurable interval)
+                    spawn_interval = random.randint(normal_spawn_min, normal_spawn_max)
 
                 # Spawn if enough time has passed
                 if current_time - last_spawn_time >= spawn_interval:

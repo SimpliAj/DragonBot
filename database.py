@@ -774,6 +774,10 @@ def init_db():
         ('blackmarket_max_per_day', 'INTEGER DEFAULT 6'),
         ('anti_double_catch', 'INTEGER DEFAULT 0'),
         ('chat_responses_enabled', 'INTEGER DEFAULT 1'),
+        ('event_spawn_interval_min', 'INTEGER DEFAULT 2'),
+        ('event_spawn_interval_max', 'INTEGER DEFAULT 5'),
+        ('normal_spawn_interval_min', 'INTEGER DEFAULT 180'),
+        ('normal_spawn_interval_max', 'INTEGER DEFAULT 900'),
     ]
     for col_name, col_def in new_columns:
         if col_name not in gs_columns:
@@ -990,6 +994,10 @@ _SERVER_CONFIG_DEFAULTS = {
     'blackmarket_max_per_day': 6,
     'anti_double_catch': 0,
     'chat_responses_enabled': 1,
+    'event_spawn_interval_min': 2,
+    'event_spawn_interval_max': 5,
+    'normal_spawn_interval_min': 180,
+    'normal_spawn_interval_max': 900,
 }
 
 def get_server_config(guild_id: int) -> dict:
@@ -999,7 +1007,9 @@ def get_server_config(guild_id: int) -> dict:
         c = conn.cursor()
         c.execute('''SELECT raids_enabled, raid_times, blackmarket_enabled,
                             blackmarket_interval_hours, blackmarket_max_per_day,
-                            anti_double_catch, chat_responses_enabled
+                            anti_double_catch, chat_responses_enabled,
+                            event_spawn_interval_min, event_spawn_interval_max,
+                            normal_spawn_interval_min, normal_spawn_interval_max
                      FROM guild_settings WHERE guild_id = ?''', (guild_id,))
         row = c.fetchone()
         conn.close()
@@ -1014,6 +1024,10 @@ def get_server_config(guild_id: int) -> dict:
             'blackmarket_max_per_day': row[4] if row[4] is not None else 6,
             'anti_double_catch': row[5] if row[5] is not None else 0,
             'chat_responses_enabled': row[6] if row[6] is not None else 1,
+            'event_spawn_interval_min': row[7] if row[7] is not None else 2,
+            'event_spawn_interval_max': row[8] if row[8] is not None else 5,
+            'normal_spawn_interval_min': row[9] if row[9] is not None else 180,
+            'normal_spawn_interval_max': row[10] if row[10] is not None else 900,
         }
     except Exception:
         return dict(_SERVER_CONFIG_DEFAULTS)
