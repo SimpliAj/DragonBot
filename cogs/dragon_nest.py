@@ -1633,9 +1633,9 @@ class DragonNestCog(commands.Cog):
                                 f"✨ All lucky charms\n"
                                 f"📚 All skills (reset to Level 0)\n"
                                 f"🏰 Dragon Nest level (reset to 0)\n"
-                                f"📖 All collected perks\n"
                                 f"💰 ALL COINS (balance will be 0)\n"
-                                f"⏰ All dragonscales\n\n"
+                                f"⏰ All dragonscales\n"
+                                f"📦 All packs (wooden/stone/bronze/silver/gold/diamond/etc.)\n\n"
                                 f"🔷 **Alpha Dragons WILL BE KEPT!**\n"
                                 f"Please make sure this is intentional! This is a hard reset to start fresh with better perks.",
                     color=discord.Color.red()
@@ -1724,6 +1724,7 @@ class DragonNestCog(commands.Cog):
                                         f"🏰 Dragon Nest level reset to 0\n"
                                         f"💰 Balance reset to 0 coins\n"
                                         f"⏰ All dragonscales deleted\n"
+                                        f"📦 All packs deleted\n"
                                         f"🎉 Lower rarity perks will no longer appear in new selections!\n\n"
                                         f"You're starting fresh with better perks! 🚀",
                             color=discord.Color.green()
