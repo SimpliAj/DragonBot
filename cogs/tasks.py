@@ -493,6 +493,23 @@ class TasksCog(commands.Cog):
                 finally:
                     if conn:
                         conn.close()
+                    # 2026-08-22, user-reported (bot repeatedly disconnecting/
+                    # reconnecting to Discord's gateway -- pm2 showed 380
+                    # restarts in 45h, error log full of gateway heartbeat
+                    # TimeoutErrors): this loop runs a full sqlite3 connect +
+                    # several queries per guild, synchronously, back to back
+                    # for every guild the bot is in, entirely on the asyncio
+                    # event loop with no yield point -- with enough guilds
+                    # this starves discord.py's own heartbeat task long
+                    # enough to miss the gateway's ACK window, which reads
+                    # as a dead connection and forces a reconnect (matches
+                    # the "database is locked" contention also seen in the
+                    # same window: other @tasks.loop tasks compete for the
+                    # same synchronous DB access). Yielding back to the
+                    # event loop after each guild lets the heartbeat (and
+                    # every other task) run on schedule instead of waiting
+                    # for the entire guild list to finish.
+                    await asyncio.sleep(0)
 
         except Exception as e:
             print(f"❌ Critical error in auto_manage_raid_bosses: {e}")
@@ -511,6 +528,16 @@ class TasksCog(commands.Cog):
     async def auto_spawn_dragons(self):
         """Auto-spawn dragons every 3-15 minutes (random) if no active spawn"""
         for guild in self.bot.guilds:
+            # 2026-08-22: same event-loop-starvation / DB-lock-contention
+            # pattern already fixed in auto_manage_raid_bosses -- this loop
+            # opens a fresh sqlite3 connection per guild synchronously with
+            # no yield point, and runs every 30s (twice as often as the
+            # raid boss loop), so it starves discord.py's heartbeat task
+            # and bursts DB connections just as badly, if not worse. Yield
+            # once per guild so the event loop (heartbeat + other tasks)
+            # gets a turn between guilds.
+            await asyncio.sleep(0)
+
             guild_id = guild.id
 
             # Skip if already has active spawn — dragon stays until caught
