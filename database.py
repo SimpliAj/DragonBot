@@ -221,6 +221,9 @@ def init_db():
         perks_activated_at INTEGER DEFAULT 0,
         perks_activated_at_current_level INTEGER DEFAULT 0,
         upgrade_level INTEGER DEFAULT 0,
+        counter_catches INTEGER DEFAULT 0,
+        streak_dragon_type TEXT,
+        streak_count INTEGER DEFAULT 0,
         PRIMARY KEY (guild_id, user_id)
     )''')
 
@@ -882,6 +885,9 @@ def migrate_database():
         'speedrun_catches': 'INTEGER DEFAULT 0',
         'perks_activated_at': 'INTEGER DEFAULT 0',
         'perks_activated_at_current_level': 'INTEGER DEFAULT 0',
+        'counter_catches': 'INTEGER DEFAULT 0',
+        'streak_dragon_type': 'TEXT',
+        'streak_count': 'INTEGER DEFAULT 0',
     }
 
     for column_name, column_def in dragon_nest_columns.items():

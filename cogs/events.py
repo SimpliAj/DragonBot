@@ -1406,12 +1406,21 @@ class EventsCog(commands.Cog):
     
                         # Apply perks
                         base_amount = 1
+                        coin_multiplier = 1.0
+                        dragon_override = None
                         try:
-                            final_amount, pack_rewards, time_bonus, perks_applied = await asyncio.to_thread(apply_perks, guild_id, message.author.id, base_amount, dragon_key)
+                            final_amount, pack_rewards, time_bonus, perks_applied, coin_multiplier, dragon_override = await asyncio.to_thread(apply_perks, guild_id, message.author.id, base_amount, dragon_key)
                         except Exception as _perks_err:
                             logger.error(f"[catch] apply_perks failed (non-fatal): {_perks_err}")
                             final_amount, pack_rewards, time_bonus, perks_applied = base_amount, [], 0, []
-    
+                            coin_multiplier = 1.0
+                            dragon_override = None
+
+                        # Rarity/master perks may have upgraded the caught dragon type
+                        if dragon_override and dragon_override in DRAGON_TYPES:
+                            dragon_key = dragon_override
+                            dragon_data = DRAGON_TYPES[dragon_key]
+
                         # Apply items (Night Vision, Dragon Magnet)
                         final_amount = apply_items(guild_id, message.author.id, final_amount)
     
@@ -1477,7 +1486,7 @@ class EventsCog(commands.Cog):
                         if final_amount > 0:
                             await add_dragons(guild_id, message.author.id, dragon_key, final_amount)
                             bingo_just_completed = await asyncio.to_thread(update_bingo_on_catch, guild_id, message.author.id, dragon_key)
-                            base_coins = max(2, int(dragon_data['value'] * final_amount))
+                            base_coins = max(2, int(dragon_data['value'] * final_amount * coin_multiplier))
                             coins_earned = base_coins
     
                             server_coin_bonus = server_alpha_count * 0.08

@@ -569,6 +569,95 @@ def get_higher_rarity_dragon(min_value: float = 0):
 
 
 # ==================== PERK SYSTEM ====================
+DRAGON_TIER_ORDER = ['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic', 'ultra']
+
+
+def _upgrade_dragon_one_tier(dragon_type: str):
+    """Return a random dragon type one rarity tier above dragon_type, or None if already at the top tier."""
+    current_rarity = get_dragon_rarity(dragon_type)
+    if current_rarity not in DRAGON_TIER_ORDER:
+        return None
+    idx = DRAGON_TIER_ORDER.index(current_rarity)
+    if idx >= len(DRAGON_TIER_ORDER) - 1:
+        return None
+    candidates = DRAGON_RARITY_TIERS.get(DRAGON_TIER_ORDER[idx + 1], [])
+    if not candidates:
+        return None
+    return random.choice(candidates)
+
+
+def _upgrade_dragon_to_tier(dragon_type: str, target_tier: str):
+    """Return a random dragon type from target_tier, or None if dragon_type is already at/above that tier."""
+    current_rarity = get_dragon_rarity(dragon_type)
+    if current_rarity not in DRAGON_TIER_ORDER or target_tier not in DRAGON_TIER_ORDER:
+        return None
+    if DRAGON_TIER_ORDER.index(current_rarity) >= DRAGON_TIER_ORDER.index(target_tier):
+        return None
+    candidates = DRAGON_RARITY_TIERS.get(target_tier, [])
+    if not candidates:
+        return None
+    return random.choice(candidates)
+
+
+def _try_fuse_dragon(guild_id: int, user_id: int, dragon_type: str):
+    """Consume 2 owned dragons of dragon_type and grant 1 of the next rarity tier up.
+    Returns the display name of the granted dragon, or None if fusion didn't happen
+    (not enough duplicates owned, or dragon_type is already at the top tier)."""
+    upgraded_type = _upgrade_dragon_one_tier(dragon_type)
+    if not upgraded_type:
+        return None
+
+    conn = get_db_connection()
+    try:
+        c = conn.cursor()
+        c.execute('SELECT count FROM user_dragons WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
+                  (guild_id, user_id, dragon_type))
+        row = c.fetchone()
+        owned = row[0] if row else 0
+        if owned < 2:
+            return None
+
+        current_time = int(time.time())
+        c.execute('UPDATE user_dragons SET count = count - 2 WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
+                  (guild_id, user_id, dragon_type))
+        c.execute('''INSERT INTO user_dragons (guild_id, user_id, dragon_type, count, last_caught_at)
+                     VALUES (?, ?, ?, 1, ?)
+                     ON CONFLICT(guild_id, user_id, dragon_type)
+                     DO UPDATE SET count = count + 1, last_caught_at = ?''',
+                  (guild_id, user_id, upgraded_type, current_time, current_time))
+        conn.commit()
+        return DRAGON_TYPES[upgraded_type]['name']
+    finally:
+        conn.close()
+
+
+def _grant_previous_catch_dragon(guild_id: int, user_id: int):
+    """Grant 1 dragon of the user's previous catch type (the catch immediately before the
+    current one, which has already been logged to dragon_catch_log). Returns the display
+    name of the granted dragon, or None if there is no previous catch on record."""
+    conn = get_db_connection()
+    try:
+        c = conn.cursor()
+        c.execute('''SELECT dragon_type FROM dragon_catch_log
+                     WHERE guild_id = ? AND user_id = ?
+                     ORDER BY caught_at DESC, id DESC LIMIT 1 OFFSET 1''', (guild_id, user_id))
+        row = c.fetchone()
+        if not row or row[0] not in DRAGON_TYPES:
+            return None
+        prev_type = row[0]
+
+        current_time = int(time.time())
+        c.execute('''INSERT INTO user_dragons (guild_id, user_id, dragon_type, count, last_caught_at)
+                     VALUES (?, ?, ?, 1, ?)
+                     ON CONFLICT(guild_id, user_id, dragon_type)
+                     DO UPDATE SET count = count + 1, last_caught_at = ?''',
+                  (guild_id, user_id, prev_type, current_time, current_time))
+        conn.commit()
+        return DRAGON_TYPES[prev_type]['name']
+    finally:
+        conn.close()
+
+
 def get_user_perks(guild_id: int, user_id: int):
     """Get all active perks for a user (only non-expired ones)."""
     conn = get_db_connection()
@@ -588,22 +677,42 @@ def get_user_perks(guild_id: int, user_id: int):
 
 
 def apply_perks(guild_id: int, user_id: int, base_amount: int, dragon_type: str):
-    """Apply all active perks to a catch. Returns (final_amount, pack_rewards, time_bonus, perks_applied)."""
+    """Apply all active perks to a catch.
+    Returns (final_amount, pack_rewards, time_bonus, perks_applied, coin_multiplier, dragon_override).
+    dragon_override is the new dragon type if a rarity/master perk upgraded the catch, else None.
+    coin_multiplier is applied by the caller on top of the normal coin calculation."""
     perks = get_user_perks(guild_id, user_id)
     final_amount = base_amount
     pack_rewards = []
     time_bonus = 0
     perks_applied = []
+    coin_multiplier = 1.0
+    current_dragon_type = dragon_type
 
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute('SELECT speedrun_catches FROM dragon_nest WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
+    c.execute('SELECT speedrun_catches, counter_catches, streak_dragon_type, streak_count FROM dragon_nest WHERE guild_id = ? AND user_id = ?',
+              (guild_id, user_id))
     result = c.fetchone()
-    speedrun_count = result[0] if result else 0
+    speedrun_count = result[0] if result and result[0] is not None else 0
+    counter_catches_before = result[1] if result and result[1] is not None else 0
+    prev_streak_type = result[2] if result else None
+    prev_streak_count = result[3] if result and result[3] is not None else 0
 
     c.execute('SELECT COUNT(*) FROM user_alphas WHERE guild_id = ? AND user_id = ?', (guild_id, user_id))
     alpha_count = c.fetchone()[0]
+
+    # Collector: was this dragon type already owned before this catch?
+    c.execute('SELECT count FROM user_dragons WHERE guild_id = ? AND user_id = ? AND dragon_type = ?',
+              (guild_id, user_id, dragon_type))
+    existing_row = c.fetchone()
+    is_new_dragon_type = (existing_row is None or existing_row[0] <= 0)
     conn.close()
+
+    # Streak/counter bookkeeping — tracked every catch regardless of perks equipped,
+    # same pattern as speedrun_catches below.
+    new_streak_count = prev_streak_count + 1 if dragon_type == prev_streak_type else 1
+    new_counter_catches = counter_catches_before + 1
 
     if alpha_count > 0:
         alpha_boost = 0.06 * math.log(2 * alpha_count + 1)
@@ -653,48 +762,93 @@ def apply_perks(guild_id: int, user_id: int, base_amount: int, dragon_type: str)
                 final_amount *= 2
                 perks_applied.append(f"⚡ {perk_name}")
         elif perk_type == 'rarity':
+            # "X% chance rarity +1" — bump the caught dragon up exactly one rarity tier.
             if random.random() < perk_value:
-                perks_applied.append(f"✨ {perk_name} (triggered)")
+                upgraded_type = _upgrade_dragon_one_tier(current_dragon_type)
+                if upgraded_type:
+                    current_dragon_type = upgraded_type
+                    perks_applied.append(f"✨ {perk_name} (rarity +1 → {DRAGON_TYPES[upgraded_type]['name']} Dragon!)")
         elif perk_type == 'coins':
+            # "+X% coins from catch" — flat coin bonus, always active while equipped.
             if perk_value > 0:
-                perks_applied.append(f"💰 {perk_name} (active)")
+                coin_multiplier += perk_value
+                perks_applied.append(f"💰 {perk_name} (+{perk_value*100:.0f}% coins)")
         elif perk_type == 'steal':
-            if random.random() < perk_value:
-                perks_applied.append(f"🎯 {perk_name} (triggered)")
+            # SKIPPED: "chance to steal from other dragons" is too ambiguous (steal what,
+            # from whom, how much?) and any literal reading would touch another player's
+            # economy data. Left inert pending a human decision on the intended mechanic.
+            pass
         elif perk_type == 'fusion':
+            # "X% chance to fuse 2 dragons into 1 stronger" — consumes 2 owned dragons of
+            # the caught type and grants 1 dragon from the next rarity tier up.
             if random.random() < perk_value:
-                perks_applied.append(f"🔗 {perk_name} (triggered)")
+                fused_name = _try_fuse_dragon(guild_id, user_id, current_dragon_type)
+                if fused_name:
+                    perks_applied.append(f"🔗 {perk_name} (fused 2 → 1 {fused_name} Dragon!)")
         elif perk_type == 'mimic':
+            # "X% chance to mimic last caught dragon type" — grants +1 of the user's
+            # previous catch's dragon type.
             if random.random() < perk_value:
-                perks_applied.append(f"🪞 {perk_name} (triggered)")
+                mimicked_name = _grant_previous_catch_dragon(guild_id, user_id)
+                if mimicked_name:
+                    perks_applied.append(f"🪞 {perk_name} (+1 {mimicked_name} Dragon!)")
         elif perk_type == 'echo':
+            # "X% chance to echo-catch previous dragon" — same mechanic as mimic (grants
+            # +1 of the user's previous catch's dragon type), different flavor/tier.
             if random.random() < perk_value:
-                perks_applied.append(f"📢 {perk_name} (triggered)")
+                echoed_name = _grant_previous_catch_dragon(guild_id, user_id)
+                if echoed_name:
+                    perks_applied.append(f"📢 {perk_name} (+1 {echoed_name} Dragon!)")
         elif perk_type == 'counter':
-            if perk_value > 0:
-                perks_applied.append(f"📊 {perk_name} (active)")
+            # "+N bonus dragons every 10 catches" — persistent per-user catch counter.
+            if perk_value > 0 and new_counter_catches % 10 == 0:
+                bonus = int(perk_value)
+                if bonus > 0:
+                    final_amount += bonus
+                    perks_applied.append(f"📊 {perk_name} (+{bonus} bonus dragons!)")
         elif perk_type == 'streak':
-            if perk_value > 0:
-                perks_applied.append(f"🔥 {perk_name} (active)")
+            # "+X% bonus on streaks of 5+ same dragon" — coin bonus while on a same-type streak.
+            if perk_value > 0 and new_streak_count >= 5:
+                coin_multiplier += perk_value
+                perks_applied.append(f"🔥 {perk_name} (streak x{new_streak_count}, +{perk_value*100:.0f}% coins)")
         elif perk_type == 'collector':
-            if perk_value > 0:
-                perks_applied.append(f"🏆 {perk_name} (active)")
+            # "+X% extra coins per unique dragon type" — bonus coins when the catch is a
+            # dragon type the user doesn't already own.
+            if perk_value > 0 and is_new_dragon_type:
+                coin_multiplier += perk_value
+                perks_applied.append(f"🏆 {perk_name} (+{perk_value*100:.0f}% coins, new dragon type!)")
         elif perk_type == 'master':
+            # "X% chance to catch rare/ultra-rare dragons" — reroll the catch up to the
+            # 'rare' tier (base perks) or the 'ultra' tier ("ultra-rare" perks).
             if random.random() < perk_value:
-                perks_applied.append(f"👑 {perk_name} (triggered)")
+                target_tier = 'ultra' if 'ultra-rare' in perk_effect.lower() else 'rare'
+                upgraded_type = _upgrade_dragon_to_tier(current_dragon_type, target_tier)
+                if upgraded_type:
+                    current_dragon_type = upgraded_type
+                    perks_applied.append(f"👑 {perk_name} (upgraded to {DRAGON_TYPES[upgraded_type]['name']} Dragon!)")
         elif perk_type == 'perfect':
+            # "X% chance to catch +1 extra dragon"
             if random.random() < perk_value:
-                perks_applied.append(f"💎 {perk_name} (triggered)")
+                final_amount += 1
+                perks_applied.append(f"💎 {perk_name} (+1 extra dragon!)")
 
+    dragon_override = current_dragon_type if current_dragon_type != dragon_type else None
+
+    conn = get_db_connection()
+    c = conn.cursor()
     if speedrun_count < 60:
-        conn = get_db_connection()
-        c = conn.cursor()
-        c.execute('UPDATE dragon_nest SET speedrun_catches = speedrun_catches + 1 WHERE guild_id = ? AND user_id = ?',
-                  (guild_id, user_id))
-        conn.commit()
-        conn.close()
+        c.execute('''UPDATE dragon_nest SET speedrun_catches = speedrun_catches + 1,
+                     counter_catches = ?, streak_dragon_type = ?, streak_count = ?
+                     WHERE guild_id = ? AND user_id = ?''',
+                  (new_counter_catches, dragon_type, new_streak_count, guild_id, user_id))
+    else:
+        c.execute('''UPDATE dragon_nest SET counter_catches = ?, streak_dragon_type = ?, streak_count = ?
+                     WHERE guild_id = ? AND user_id = ?''',
+                  (new_counter_catches, dragon_type, new_streak_count, guild_id, user_id))
+    conn.commit()
+    conn.close()
 
-    return final_amount, pack_rewards, time_bonus, perks_applied
+    return final_amount, pack_rewards, time_bonus, perks_applied, coin_multiplier, dragon_override
 
 
 def apply_items(guild_id: int, user_id: int, base_amount: int) -> tuple:
