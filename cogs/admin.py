@@ -1884,6 +1884,68 @@ class BlackMarketIntervalModal(discord.ui.Modal, title="Black Market Settings"):
         )
 
 
+class EventSpawnIntervalModal(discord.ui.Modal, title="Event Spawn Rate"):
+    min_seconds = discord.ui.TextInput(
+        label="Min seconds", placeholder="2", min_length=1, max_length=2
+    )
+    max_seconds = discord.ui.TextInput(
+        label="Max seconds", placeholder="5", min_length=1, max_length=2
+    )
+
+    def __init__(self, current_min: int, current_max: int):
+        super().__init__()
+        self.min_seconds.default = str(current_min)
+        self.max_seconds.default = str(current_max)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        from database import update_server_config
+        try:
+            min_val = max(1, min(60, int(self.min_seconds.value)))
+            max_val = max(1, min(60, int(self.max_seconds.value)))
+        except ValueError:
+            await interaction.response.send_message("❌ Please enter valid numbers.", ephemeral=True)
+            return
+        if min_val > max_val:
+            min_val, max_val = max_val, min_val
+        update_server_config(interaction.guild_id, 'event_spawn_interval_min', min_val)
+        update_server_config(interaction.guild_id, 'event_spawn_interval_max', max_val)
+        await interaction.response.edit_message(
+            embed=_build_config_embed(interaction.guild_id),
+            view=ServerConfigView(interaction.guild_id),
+        )
+
+
+class NormalSpawnIntervalModal(discord.ui.Modal, title="Normal Spawn Rate"):
+    min_seconds = discord.ui.TextInput(
+        label="Min seconds", placeholder="180", min_length=1, max_length=4
+    )
+    max_seconds = discord.ui.TextInput(
+        label="Max seconds", placeholder="900", min_length=1, max_length=4
+    )
+
+    def __init__(self, current_min: int, current_max: int):
+        super().__init__()
+        self.min_seconds.default = str(current_min)
+        self.max_seconds.default = str(current_max)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        from database import update_server_config
+        try:
+            min_val = max(30, min(3600, int(self.min_seconds.value)))
+            max_val = max(30, min(3600, int(self.max_seconds.value)))
+        except ValueError:
+            await interaction.response.send_message("❌ Please enter valid numbers.", ephemeral=True)
+            return
+        if min_val > max_val:
+            min_val, max_val = max_val, min_val
+        update_server_config(interaction.guild_id, 'normal_spawn_interval_min', min_val)
+        update_server_config(interaction.guild_id, 'normal_spawn_interval_max', max_val)
+        await interaction.response.edit_message(
+            embed=_build_config_embed(interaction.guild_id),
+            view=ServerConfigView(interaction.guild_id),
+        )
+
+
 class ServerConfigView(discord.ui.View):
     def __init__(self, guild_id: int):
         super().__init__(timeout=120)
@@ -1944,6 +2006,22 @@ class ServerConfigView(discord.ui.View):
             BlackMarketIntervalModal(cfg['blackmarket_interval_hours'], cfg['blackmarket_max_per_day'])
         )
 
+    @discord.ui.button(label="Event Spawn Rate", style=discord.ButtonStyle.secondary, row=2)
+    async def event_spawn_interval(self, interaction: discord.Interaction, button: discord.ui.Button):
+        from database import get_server_config
+        cfg = get_server_config(self.guild_id)
+        await interaction.response.send_modal(
+            EventSpawnIntervalModal(cfg['event_spawn_interval_min'], cfg['event_spawn_interval_max'])
+        )
+
+    @discord.ui.button(label="Normal Spawn Rate", style=discord.ButtonStyle.secondary, row=3)
+    async def normal_spawn_interval(self, interaction: discord.Interaction, button: discord.ui.Button):
+        from database import get_server_config
+        cfg = get_server_config(self.guild_id)
+        await interaction.response.send_modal(
+            NormalSpawnIntervalModal(cfg['normal_spawn_interval_min'], cfg['normal_spawn_interval_max'])
+        )
+
 
 def _build_config_embed(guild_id: int) -> discord.Embed:
     from database import get_server_config
@@ -1979,6 +2057,16 @@ def _build_config_embed(guild_id: int) -> discord.Embed:
     embed.add_field(
         name="💬 Chat Responses",
         value=f"Status: **{chat_status}**\nTypo mocking & cat jokes in dragon channel",
+        inline=False,
+    )
+    embed.add_field(
+        name="⚡ Event Spawn Rate",
+        value=f"{cfg['event_spawn_interval_min']}-{cfg['event_spawn_interval_max']}s during Dragonscale/Dragonfest",
+        inline=False,
+    )
+    embed.add_field(
+        name="🐉 Normal Spawn Rate",
+        value=f"{cfg['normal_spawn_interval_min']}-{cfg['normal_spawn_interval_max']}s ({cfg['normal_spawn_interval_min']//60}-{cfg['normal_spawn_interval_max']//60} min) outside events",
         inline=False,
     )
     embed.set_footer(text="Raids and Black Market are disabled by default.")
