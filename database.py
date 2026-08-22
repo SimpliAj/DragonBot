@@ -8,8 +8,6 @@ import time
 import json
 import asyncio
 import logging
-import threading
-import traceback
 
 import discord
 
@@ -27,92 +25,12 @@ logger = logging.getLogger(__name__)
 
 
 # ==================== DATABASE CONNECTION ====================
-# Most call sites across the cogs open a connection and close it manually at
-# the end of the function without a try/finally — if an exception (e.g. the
-# very "database is locked" error this is meant to fix) is raised between
-# open and close, that connection's write-transaction can stay open and keep
-# holding SQLite's single-writer lock indefinitely, causing every other
-# writer to fail too ("database is locked" cascading long past the 30s
-# busy_timeout). Rewriting every call site to use try/finally is the real
-# fix but touches 100+ functions across a live economy bot — too large a
-# blast radius for one pass. This watchdog is the safety net in the
-# meantime: track every open connection, and force-close any that are still
-# genuinely mid-transaction (holding the writer lock) long after any real
-# operation in this codebase should have finished, logging exactly where it
-# was opened so the real leaking call site can be fixed with evidence
-# instead of another guess. `sqlite3.Connection.close` is a read-only slot
-# on the C type (can't be monkeypatched per-instance, confirmed), so this
-# can't hook the caller's own close() call directly — instead it polls each
-# tracked connection's public `.in_transaction` property, which raises
-# ProgrammingError once the caller has already closed it normally (the
-# common, non-leaked case) — that's how a normal, already-closed connection
-# gets silently dropped from tracking within one sweep tick instead of
-# being mistaken for a leak.
-_STALE_CONNECTION_SECONDS = 60.0
-_open_connections_lock = threading.Lock()
-_open_connections = {}  # id(conn) -> (conn, opened_at, stack)
-
-
-def _watchdog_loop():
-    while True:
-        time.sleep(5)
-        now = time.time()
-        with _open_connections_lock:
-            tracked = list(_open_connections.items())
-        for cid, (conn, opened_at, stack) in tracked:
-            try:
-                still_in_txn = conn.in_transaction
-            except sqlite3.ProgrammingError:
-                # Already closed by its caller, the normal/expected path.
-                with _open_connections_lock:
-                    _open_connections.pop(cid, None)
-                continue
-            age = now - opened_at
-            if age <= _STALE_CONNECTION_SECONDS:
-                continue
-            if still_in_txn:
-                logger.error(
-                    f"Force-closing leaked DB connection, open {age:.1f}s with an "
-                    f"uncommitted transaction (holding the writer lock). Opened at:\n{stack}"
-                )
-            else:
-                logger.warning(
-                    f"Closing forgotten DB connection, open {age:.1f}s idle (no pending "
-                    f"transaction, not lock-related, just never closed). Opened at:\n{stack}"
-                )
-            try:
-                conn.close()
-            except Exception:
-                pass
-            with _open_connections_lock:
-                _open_connections.pop(cid, None)
-
-
-_watchdog_started = False
-_watchdog_start_lock = threading.Lock()
-
-
-def _ensure_watchdog_started():
-    global _watchdog_started
-    if _watchdog_started:
-        return
-    with _watchdog_start_lock:
-        if not _watchdog_started:
-            threading.Thread(target=_watchdog_loop, name="db-conn-watchdog", daemon=True).start()
-            _watchdog_started = True
-
-
 def get_db_connection(timeout: float = DB_TIMEOUT_SHORT):
     """Get a database connection with WAL mode and busy timeout."""
-    _ensure_watchdog_started()
     conn = sqlite3.connect(DB_PATH, timeout=timeout, check_same_thread=False)
     conn.execute('PRAGMA journal_mode=WAL')
     conn.execute('PRAGMA synchronous=NORMAL')
     conn.execute(f'PRAGMA busy_timeout={DB_BUSY_TIMEOUT}')
-
-    with _open_connections_lock:
-        _open_connections[id(conn)] = (conn, time.time(), "".join(traceback.format_stack()[:-1]))
-
     return conn
 
 
