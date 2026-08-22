@@ -143,6 +143,28 @@ class TasksCog(commands.Cog):
             for guild_id in list(last_catch_attempts.keys()):
                 if current_time - last_catch_attempts[guild_id].get('timestamp', 0) > 3600:
                     del last_catch_attempts[guild_id]
+
+            # 2026-08-01: raid_bosses/dragon_nest/dragonfest all had an
+            # expiry cleanup, active_dragon_spawns never did -- a dragon
+            # nobody catches (deleted channel, permission loss, bot
+            # downtime mid-catch, whatever) blocks that guild's spawns
+            # forever since auto_spawn_dragons never spawns a new one
+            # while a row still exists. Found live 2026-08-01: 40 guilds
+            # stuck for 24h-2311h (up to 96 days). Manual one-time cleanup
+            # done; this is the permanent safety net so it can't silently
+            # reaccumulate.
+            try:
+                conn = get_db_connection()
+                try:
+                    c = conn.cursor()
+                    c.execute("DELETE FROM active_dragon_spawns WHERE (strftime('%s','now') - spawn_timestamp) > 86400")
+                    if c.rowcount > 0:
+                        logger.warning(f"Cleared {c.rowcount} stale active_dragon_spawns entries (unclaimed >24h)")
+                    conn.commit()
+                finally:
+                    conn.close()
+            except Exception as e:
+                logger.error(f"Stale dragon spawn cleanup error: {e}")
         except Exception as e:
             logger.error(f"Lock cleanup error: {e}")
 
