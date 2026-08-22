@@ -3,6 +3,7 @@ cogs/devpanel.py - /devpanel slash command (DEV_USER_ID only).
 Replaces all -db prefix commands with an interactive panel.
 """
 
+import logging
 import os
 import sqlite3
 import time
@@ -13,6 +14,8 @@ from discord.ext import commands
 
 from config import DEV_USER_ID, DRAGON_TYPES, PACK_TYPES
 from database import get_db_connection
+
+logger = logging.getLogger(__name__)
 
 # ── Select options (built once at import time) ────────────────────────────────
 _DRAGON_OPTIONS = [
@@ -58,13 +61,35 @@ class _FakeChannel:
         self._interaction = interaction
 
     async def send(self, content=None, embed=None, view=None, **kwargs):
+        # 2026-08-01: this used to be `except Exception: pass` -- every
+        # admin/dev-panel button (not just Spawn Status) routes its reply
+        # through here, so any failure here made the button silently do
+        # nothing with zero trace anywhere, ever. Reported live: "spawn
+        # status button doesn't do anything". Now logs the real error and
+        # still tries to tell the user something went wrong instead of
+        # leaving them staring at a spinner that times out silently.
         try:
             if embed:
-                await self._interaction.followup.send(embed=embed, view=view, ephemeral=True)
+                # 2026-08-01: discord.py's followup.send() rejects
+                # view=None outright ("expected view parameter to be of
+                # type View or LayoutView, not NoneType") -- it must be
+                # omitted entirely when there's no view, not passed as
+                # None. This was the actual bug behind "Spawn Status does
+                # nothing": every call here passes view=None (no command
+                # in this codebase attaches a view to its reply), so this
+                # kwarg has been unconditionally broken this whole time.
+                if view is not None:
+                    await self._interaction.followup.send(embed=embed, view=view, ephemeral=True)
+                else:
+                    await self._interaction.followup.send(embed=embed, ephemeral=True)
             elif content:
                 await self._interaction.followup.send(str(content), ephemeral=True)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"_FakeChannel.send failed (command reply lost): {e}", exc_info=True)
+            try:
+                await self._interaction.followup.send(f"❌ Error displaying result: {e}", ephemeral=True)
+            except Exception:
+                pass
 
 
 class FakeMessage:
