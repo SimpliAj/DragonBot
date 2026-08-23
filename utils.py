@@ -658,6 +658,27 @@ def _grant_previous_catch_dragon(guild_id: int, user_id: int):
         conn.close()
 
 
+def _grant_dragon_type(guild_id: int, user_id: int, dragon_type: str):
+    """Grant 1 dragon of the given type directly (used by perks that duplicate a known
+    catch, e.g. mimic duplicating the current catch). Returns the display name of the
+    granted dragon, or None if dragon_type isn't a valid dragon type."""
+    if dragon_type not in DRAGON_TYPES:
+        return None
+    conn = get_db_connection()
+    try:
+        c = conn.cursor()
+        current_time = int(time.time())
+        c.execute('''INSERT INTO user_dragons (guild_id, user_id, dragon_type, count, last_caught_at)
+                     VALUES (?, ?, ?, 1, ?)
+                     ON CONFLICT(guild_id, user_id, dragon_type)
+                     DO UPDATE SET count = count + 1, last_caught_at = ?''',
+                  (guild_id, user_id, dragon_type, current_time, current_time))
+        conn.commit()
+        return DRAGON_TYPES[dragon_type]['name']
+    finally:
+        conn.close()
+
+
 def get_user_perks(guild_id: int, user_id: int):
     """Get all active perks for a user (only non-expired ones)."""
     conn = get_db_connection()
@@ -774,10 +795,14 @@ def apply_perks(guild_id: int, user_id: int, base_amount: int, dragon_type: str)
                 coin_multiplier += perk_value
                 perks_applied.append(f"💰 {perk_name} (+{perk_value*100:.0f}% coins)")
         elif perk_type == 'steal':
-            # SKIPPED: "chance to steal from other dragons" is too ambiguous (steal what,
-            # from whom, how much?) and any literal reading would touch another player's
-            # economy data. Left inert pending a human decision on the intended mechanic.
-            pass
+            # "X% chance to steal from other dragons" — interpreted as stealing an extra
+            # dragon from the wild/game pool during this catch (NOT from another player's
+            # collection, to avoid touching another user's data/economy fairness). Same
+            # underlying mechanic as 'perfect' (+1 extra dragon on trigger), but themed and
+            # worded distinctly so the two don't read as identical to the user.
+            if random.random() < perk_value:
+                final_amount += 1
+                perks_applied.append(f"🥷 {perk_name} (stole an extra dragon!)")
         elif perk_type == 'fusion':
             # "X% chance to fuse 2 dragons into 1 stronger" — consumes 2 owned dragons of
             # the caught type and grants 1 dragon from the next rarity tier up.
@@ -786,12 +811,15 @@ def apply_perks(guild_id: int, user_id: int, base_amount: int, dragon_type: str)
                 if fused_name:
                     perks_applied.append(f"🔗 {perk_name} (fused 2 → 1 {fused_name} Dragon!)")
         elif perk_type == 'mimic':
-            # "X% chance to mimic last caught dragon type" — grants +1 of the user's
-            # previous catch's dragon type.
+            # "X% chance to mimic last caught dragon type" — duplicates the CURRENT catch:
+            # grants +1 of the SAME dragon type just caught this time (uses current_dragon_type
+            # so it reflects any rarity/master upgrade already applied earlier in this loop,
+            # same convention as fusion). Differentiated from 'echo', which instead grants
+            # +1 of the user's PREVIOUS catch.
             if random.random() < perk_value:
-                mimicked_name = _grant_previous_catch_dragon(guild_id, user_id)
+                mimicked_name = _grant_dragon_type(guild_id, user_id, current_dragon_type)
                 if mimicked_name:
-                    perks_applied.append(f"🪞 {perk_name} (+1 {mimicked_name} Dragon!)")
+                    perks_applied.append(f"🪞 {perk_name} (copied itself, +1 {mimicked_name} Dragon!)")
         elif perk_type == 'echo':
             # "X% chance to echo-catch previous dragon" — same mechanic as mimic (grants
             # +1 of the user's previous catch's dragon type), different flavor/tier.
