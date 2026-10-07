@@ -290,6 +290,7 @@ class TopggCog(commands.Cog):
         is_weekend = data.get('isWeekend', False)
         is_test = data.get('type') == 'test'
 
+        logger.info(f"Top.gg vote received: user={user_id} test={is_test} weekend={is_weekend}")
         asyncio.create_task(self._process_vote(user_id, is_weekend, is_test))
         return web.Response(status=200)
 
@@ -333,6 +334,7 @@ class TopggCog(commands.Cog):
             logger.info(f"Vote for user {user_id} — not in any shared guild.")
             return
 
+        logger.info(f"Top.gg vote processed: user={user_id} guild={member.guild.id} streak={streak} total={total} day={day_in_cycle} coins={reward['coins']}")
         await asyncio.to_thread(update_balance, member.guild.id, user_id, reward['coins'])
         await asyncio.to_thread(_give_pack, member.guild.id, user_id, reward['pack'])
         if is_weekend:

@@ -2191,8 +2191,9 @@ class TasksCog(commands.Cog):
                     '''SELECT user_id, current_streak, total_votes FROM vote_streaks
                        WHERE current_streak > 0
                        AND last_vote_time < ?
+                       AND last_vote_time < ?
                        AND (last_reminder_date IS NULL OR last_reminder_date != ?)''',
-                    (today_midnight_ts, today_str)
+                    (today_midnight_ts, int(time.time()) - 12 * 3600, today_str)
                 )
                 rows = c.fetchall()
             finally:
@@ -2222,6 +2223,10 @@ class TasksCog(commands.Cog):
 
                 try:
                     await member.send(embed=embed)
+                except Exception as e:
+                    logger.warning(f"vote_reminder DM failed for {user_id}: {e}")
+                    continue
+                try:
                     conn2 = get_db_connection()
                     try:
                         conn2.execute(
@@ -2231,8 +2236,8 @@ class TasksCog(commands.Cog):
                         conn2.commit()
                     finally:
                         conn2.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"vote_reminder DB update failed for {user_id}: {e}")
         except Exception as e:
             logger.error(f"vote_reminder_task error: {e}", exc_info=True)
 
