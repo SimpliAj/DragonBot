@@ -34,6 +34,54 @@ def get_db_connection(timeout: float = DB_TIMEOUT_SHORT):
     return conn
 
 
+def db_txn(fn):
+    """
+    Run fn(conn) against a fresh connection: commit on success, roll back on
+    error, ALWAYS close. This is the leak-proof shape the 2026-05-21 and
+    2026-09-03 fixes had to keep re-applying by hand at individual call sites
+    (a write that raised before conn.close() leaked a connection still holding
+    the sqlite write lock, which blocked every other writer). New code should
+    use this instead of open-coding get_db_connection()/close().
+    """
+    conn = None
+    try:
+        conn = get_db_connection()
+        result = fn(conn)
+        conn.commit()
+        return result
+    except Exception:
+        if conn is not None:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        raise
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
+async def adb(fn, *args, **kwargs):
+    """
+    Await a blocking sqlite callable on a worker thread.
+
+    sqlite's busy handler blocks the calling thread inside C, so calling any of
+    this module's synchronous helpers directly from a coroutine freezes the
+    whole event loop -- gateway heartbeat included -- for up to
+    DB_BUSY_TIMEOUT. Routing them through a thread keeps the loop servicing
+    the heartbeat and every other guild while one query waits on a lock.
+    """
+    return await asyncio.to_thread(fn, *args, **kwargs)
+
+
+async def adb_txn(fn):
+    """Async db_txn(): leak-proof transaction, run off the event loop thread."""
+    return await asyncio.to_thread(db_txn, fn)
+
+
 def safe_db_operation(func, max_retries: int = RETRY_MAX_ATTEMPTS, retry_delay: float = RETRY_DELAY):
     """Execute a database operation with automatic retry logic."""
     for attempt in range(max_retries):

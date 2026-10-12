@@ -15,10 +15,24 @@ DRAGONPASS_QUEST_REWARDS = os.getenv('DRAGONPASS_QUEST_REWARDS', 'true').lower()
 
 # ==================== GLOBAL CONSTANTS ====================
 DB_PATH = 'dragon_bot.db'
-DB_TIMEOUT_SHORT = 60.0
-DB_TIMEOUT_MEDIUM = 60.0
-DB_TIMEOUT_LONG = 60.0
-DB_BUSY_TIMEOUT = 60000
+# 2026-09-03: these were all 60s. sqlite's busy handler blocks the CALLING
+# THREAD in C, so any lock contention on a connection opened from the asyncio
+# thread froze the entire bot for a full minute -- gateway heartbeat included.
+# That is what turned a DB lock storm into the 8h23m outage on 2026-09-01
+# 21:00 -> 09-02 05:23 UTC: each frozen minute blew discord.py's 60s
+# ws_connect budget, every reconnect failed with TimeoutError, and
+# discord.py's ExponentialBackoff climbed to its 2**10 = ~1024s cap, so the
+# bot sat idle up to 17 minutes between attempts while pm2 still reported
+# "online" (the process never exited). 222 lock timeouts x 60s = ~3h42m of
+# dead event loop inside that 8h window.
+# 8s is comfortably above normal contention for this bot's write pattern
+# (short single-statement transactions) but far below the 60s ws_connect
+# budget, so a lock wave can no longer starve the gateway into a backoff
+# spiral -- it degrades to a few seconds of lag and a loud error instead.
+DB_TIMEOUT_SHORT = 8.0
+DB_TIMEOUT_MEDIUM = 8.0
+DB_TIMEOUT_LONG = 8.0
+DB_BUSY_TIMEOUT = 8000
 RETRY_MAX_ATTEMPTS = 5
 RETRY_DELAY = 0.5
 

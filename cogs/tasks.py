@@ -21,7 +21,7 @@ from config import (
     DRAGON_RARITY_TIERS, DRAGON_TYPES, DRAGONNEST_UPGRADES, LEVEL_NAMES,
     RAID_DURATION_HOURS, RAID_SPAWN_TIMES, normalize_dragon_type,
 )
-from database import get_db_connection
+from database import get_db_connection, db_txn
 from state import (
     active_breeding_sessions, active_dragonfest, active_dragonscales,
     active_luckycharms, active_spawns, black_market_active,
@@ -91,6 +91,7 @@ class TasksCog(commands.Cog):
         self.vote_reminder_deadline_task.start()
         self.daily_streak_reminder.start()
         self.cleanup_streak_dm_spam.start()
+        self.gateway_heartbeat_task.start()
 
     async def cog_load(self):
         """Re-register persistent ignore-reminder views for all unconfigured guilds after restart."""
@@ -124,6 +125,26 @@ class TasksCog(commands.Cog):
         self.vote_reminder_deadline_task.cancel()
         self.daily_streak_reminder.cancel()
         self.cleanup_streak_dm_spam.cancel()
+        self.gateway_heartbeat_task.cancel()
+
+    # ==================== GATEWAY HEARTBEAT (watchdog input) ====================
+    @tasks.loop(seconds=20)
+    async def gateway_heartbeat_task(self):
+        """
+        Refresh the liveness timestamp the main.py watchdog thread reads.
+
+        Advancing it proves two things at once: the gateway is connected, AND
+        the event loop is still scheduling tasks. If either stops being true the
+        timestamp goes stale and the watchdog restarts the process.
+        """
+        from state import gateway_state
+        if gateway_state.get('connected') and not self.bot.is_closed():
+            gateway_state['last_ok'] = time.time()
+
+    @gateway_heartbeat_task.error
+    async def on_gateway_heartbeat_task_error(self, error):
+        logger.error(f'gateway_heartbeat_task crashed, restarting: {error}', exc_info=True)
+        self.gateway_heartbeat_task.restart()
 
     # ==================== CLEANUP LOCKS TASK ====================
     @tasks.loop(minutes=30)
@@ -153,16 +174,41 @@ class TasksCog(commands.Cog):
             # stuck for 24h-2311h (up to 96 days). Manual one-time cleanup
             # done; this is the permanent safety net so it can't silently
             # reaccumulate.
+            # 2026-09-03: the DB-side cleanup above only ever deleted the
+            # active_dragon_spawns ROW. auto_spawn_dragons gates on the
+            # IN-MEMORY active_spawns dict, which was never touched, so a guild
+            # whose dragon nobody caught stayed blocked from new spawns for the
+            # rest of the process lifetime even after its row was purged -- the
+            # "safety net" never actually unstuck anything without a restart.
+            # Purge the in-memory entry on the same 24h rule, and reset
+            # last_spawn_time so the guild spawns again on the next tick.
+            stale_cutoff = int(time.time()) - 86400
+            stale_guilds = [
+                gid for gid, data in list(active_spawns.items())
+                if (data or {}).get('timestamp', 0) and data['timestamp'] < stale_cutoff
+            ]
+            for gid in stale_guilds:
+                active_spawns.pop(gid, None)
+            if stale_guilds:
+                logger.warning(
+                    f"Cleared {len(stale_guilds)} stale in-memory active_spawns entries "
+                    f"(unclaimed >24h): {stale_guilds}"
+                )
+
+            # 2026-09-03: moved off the event loop (17 on-loop "database is
+            # locked" freezes during the 2026-09-01 outage).
+            def _cleanup_txn(conn):
+                c = conn.cursor()
+                c.execute("DELETE FROM active_dragon_spawns WHERE (strftime('%s','now') - spawn_timestamp) > 86400")
+                cleared = c.rowcount
+                for gid in stale_guilds:
+                    c.execute('UPDATE spawn_config SET last_spawn_time = 0 WHERE guild_id = ?', (gid,))
+                return cleared
+
             try:
-                conn = get_db_connection()
-                try:
-                    c = conn.cursor()
-                    c.execute("DELETE FROM active_dragon_spawns WHERE (strftime('%s','now') - spawn_timestamp) > 86400")
-                    if c.rowcount > 0:
-                        logger.warning(f"Cleared {c.rowcount} stale active_dragon_spawns entries (unclaimed >24h)")
-                    conn.commit()
-                finally:
-                    conn.close()
+                cleared = await asyncio.to_thread(db_txn, _cleanup_txn)
+                if cleared and cleared > 0:
+                    logger.warning(f"Cleared {cleared} stale active_dragon_spawns entries (unclaimed >24h)")
             except Exception as e:
                 logger.error(f"Stale dragon spawn cleanup error: {e}")
         except Exception as e:
@@ -198,7 +244,7 @@ class TasksCog(commands.Cog):
 
                     # Check server config — raids must be enabled per guild
                     from database import get_server_config
-                    guild_config = get_server_config(guild_id)
+                    guild_config = await asyncio.to_thread(get_server_config, guild_id)
                     if not guild_config['raids_enabled']:
                         continue
 
@@ -545,7 +591,7 @@ class TasksCog(commands.Cog):
                 continue
 
             # Check if spawn channel is set
-            channel_id = get_spawn_channel(guild_id)
+            channel_id = await asyncio.to_thread(get_spawn_channel, guild_id)
             if not channel_id:
                 continue
 
@@ -557,26 +603,25 @@ class TasksCog(commands.Cog):
             current_time = int(time.time())
             last_spawn_time = current_time
             should_spawn = False
+            # 2026-09-03: this ran on the event loop once per guild every 30s
+            # (~65 guilds), so any lock here froze the entire bot. Off-loaded.
+            def _spawn_cfg_txn(conn, guild_id=guild_id, current_time=current_time):
+                c = conn.cursor()
+                c.execute('SELECT last_spawn_time FROM spawn_config WHERE guild_id = ?', (guild_id,))
+                result = c.fetchone()
+                if not result:
+                    c.execute('INSERT OR IGNORE INTO spawn_config (guild_id, spawn_channel_id, last_spawn_time) VALUES (?, ?, ?)',
+                              (guild_id, None, current_time))
+                    return current_time
+                lst = result[0]
+                if lst == 0 or lst is None:
+                    c.execute('UPDATE spawn_config SET last_spawn_time = ? WHERE guild_id = ?',
+                              (current_time, guild_id))
+                    return current_time
+                return lst
+
             try:
-                conn = get_db_connection()
-                try:
-                    c = conn.cursor()
-                    c.execute('SELECT last_spawn_time FROM spawn_config WHERE guild_id = ?', (guild_id,))
-                    result = c.fetchone()
-                    if not result:
-                        c.execute('INSERT OR IGNORE INTO spawn_config (guild_id, spawn_channel_id, last_spawn_time) VALUES (?, ?, ?)',
-                                  (guild_id, None, current_time))
-                        conn.commit()
-                        last_spawn_time = current_time
-                    else:
-                        last_spawn_time = result[0]
-                        if last_spawn_time == 0 or last_spawn_time is None:
-                            last_spawn_time = current_time
-                            c.execute('UPDATE spawn_config SET last_spawn_time = ? WHERE guild_id = ?',
-                                      (current_time, guild_id))
-                            conn.commit()
-                finally:
-                    conn.close()
+                last_spawn_time = await asyncio.to_thread(db_txn, _spawn_cfg_txn)
             except sqlite3.OperationalError as e:
                 print(f"Database error in auto_spawn_dragons for guild {guild_id}: {e}")
                 continue
@@ -1111,7 +1156,7 @@ class TasksCog(commands.Cog):
         for guild_id, channel_id in spawn_channels.items():
             # Check server config — black market must be enabled per guild
             from database import get_server_config
-            guild_config = get_server_config(guild_id)
+            guild_config = await asyncio.to_thread(get_server_config, guild_id)
             if not guild_config['blackmarket_enabled']:
                 continue
 
@@ -1279,7 +1324,7 @@ class TasksCog(commands.Cog):
                                 async def callback(self_select, select_interaction: discord.Interaction):
                                     # Check softlock status
                                     from database import is_player_softlocked
-                                    is_softlocked, upgrade_level = is_player_softlocked(gid, select_interaction.user.id)
+                                    is_softlocked, upgrade_level = await asyncio.to_thread(is_player_softlocked, gid, select_interaction.user.id)
                                     if is_softlocked:
                                         upgrade_cost = DRAGONNEST_UPGRADES[upgrade_level + 1]['cost']
                                         softlock_embed = discord.Embed(
@@ -1571,7 +1616,7 @@ class TasksCog(commands.Cog):
                             dm_embed.set_footer(text=f"Server: {guild.name if guild else 'Unknown'}")
 
                             # Add button to go to spawn channel if it exists
-                            channel_id = get_spawn_channel(guild_id)
+                            channel_id = await asyncio.to_thread(get_spawn_channel, guild_id)
                             if channel_id:
                                 class GoToChannelView(discord.ui.View):
                                     def __init__(self_view):
@@ -1671,7 +1716,7 @@ class TasksCog(commands.Cog):
                         embed.set_footer(text=f"Better luck next time! | Server: {guild.name if guild else 'Unknown'}")
 
                         # Add button to go to spawn channel if it exists
-                        channel_id = get_spawn_channel(guild_id)
+                        channel_id = await asyncio.to_thread(get_spawn_channel, guild_id)
                         if channel_id:
                             class GoToChannelView(discord.ui.View):
                                 def __init__(self_view):
@@ -1777,7 +1822,7 @@ class TasksCog(commands.Cog):
                         embed.set_footer(text=f"Congratulations on the new addition! | Server: {guild.name if guild else 'Unknown'}")
 
                         # Add button to go to spawn channel if it exists
-                        channel_id = get_spawn_channel(guild_id)
+                        channel_id = await asyncio.to_thread(get_spawn_channel, guild_id)
                         if channel_id:
                             class GoToChannelView(discord.ui.View):
                                 def __init__(self_view):
@@ -1842,7 +1887,7 @@ class TasksCog(commands.Cog):
                 user = await self.bot.fetch_user(user_id)
                 if user:
                     # Add button to go to spawn channel if it exists
-                    channel_id = get_spawn_channel(guild_id)
+                    channel_id = await asyncio.to_thread(get_spawn_channel, guild_id)
                     if channel_id:
                         guild = self.bot.get_guild(guild_id)
                         class GoToChannelView(discord.ui.View):
@@ -2115,7 +2160,7 @@ class TasksCog(commands.Cog):
         current_time = int(time.time())
 
         for guild in self.bot.guilds:
-            if get_spawn_channel(guild.id):
+            if await asyncio.to_thread(get_spawn_channel, guild.id):
                 continue  # Already configured
 
             ignored_until = get_setup_reminder_ignored_until(guild.id)
@@ -2299,45 +2344,51 @@ class TasksCog(commands.Cog):
     @tasks.loop(minutes=5)
     async def vote_reminder_deadline_task(self):
         """Reset streak for users who didn't vote within 4h of their reminder DM."""
-        conn = None
-        try:
+        # 2026-09-03: this ran its sqlite work directly on the event loop. It was
+        # the single biggest on-loop freeze source during the 2026-09-01 outage
+        # (88 "database is locked" hits, each blocking the whole bot for the full
+        # busy_timeout). Body moved into a worker thread via db_txn/to_thread so
+        # a lock here can no longer stall the gateway heartbeat.
+        def _work():
             now = int(time.time())
             deadline = now - 4 * 3600
 
-            conn = get_db_connection()
-            c = conn.cursor()
-            c.execute(
-                '''SELECT user_id, streak_freezes FROM vote_streaks
-                   WHERE current_streak > 0
-                   AND reminder_sent_at IS NOT NULL
-                   AND reminder_sent_at < ?
-                   AND last_vote_time < reminder_sent_at''',
-                (deadline,)
-            )
-            rows = c.fetchall()
-            reset_count = 0
-            freeze_used_count = 0
-            for user_id, freezes in rows:
-                if freezes and freezes > 0:
-                    c.execute(
-                        'UPDATE vote_streaks SET streak_freezes = streak_freezes - 1, reminder_sent_at = NULL WHERE user_id = ?',
-                        (user_id,)
-                    )
-                    freeze_used_count += 1
-                else:
-                    c.execute(
-                        'UPDATE vote_streaks SET current_streak = 0, reminder_sent_at = NULL WHERE user_id = ?',
-                        (user_id,)
-                    )
-                    reset_count += 1
-            conn.commit()
+            def _txn(conn):
+                c = conn.cursor()
+                c.execute(
+                    '''SELECT user_id, streak_freezes FROM vote_streaks
+                       WHERE current_streak > 0
+                       AND reminder_sent_at IS NOT NULL
+                       AND reminder_sent_at < ?
+                       AND last_vote_time < reminder_sent_at''',
+                    (deadline,)
+                )
+                rows = c.fetchall()
+                reset_count = 0
+                freeze_used_count = 0
+                for user_id, freezes in rows:
+                    if freezes and freezes > 0:
+                        c.execute(
+                            'UPDATE vote_streaks SET streak_freezes = streak_freezes - 1, reminder_sent_at = NULL WHERE user_id = ?',
+                            (user_id,)
+                        )
+                        freeze_used_count += 1
+                    else:
+                        c.execute(
+                            'UPDATE vote_streaks SET current_streak = 0, reminder_sent_at = NULL WHERE user_id = ?',
+                            (user_id,)
+                        )
+                        reset_count += 1
+                return reset_count, freeze_used_count
+
+            return db_txn(_txn)
+
+        try:
+            reset_count, freeze_used_count = await asyncio.to_thread(_work)
             if reset_count > 0 or freeze_used_count > 0:
                 logger.info(f'vote_reminder_deadline: {reset_count} resets, {freeze_used_count} freezes used')
         except Exception as e:
             logger.error(f"vote_reminder_deadline_task error: {e}", exc_info=True)
-        finally:
-            if conn:
-                conn.close()
 
     @vote_reminder_deadline_task.error
     async def on_vote_reminder_deadline_task_error(self, error):
@@ -2356,8 +2407,8 @@ class TasksCog(commands.Cog):
             now = int(time.time())
             window_start = now - 23 * 3600
             window_end = now - 20 * 3600
-            conn = get_db_connection()
-            try:
+            # 2026-09-03: off the event loop (see config.py DB_BUSY_TIMEOUT note).
+            def _fetch_due(conn):
                 c = conn.cursor()
                 # Only fetch rows where reminder hasn't been sent yet for this cycle
                 # (streak_reminder_sent_at < daily_last_claimed means not yet sent since last claim)
@@ -2369,15 +2420,43 @@ class TasksCog(commands.Cog):
                          AND (streak_reminder_sent_at IS NULL OR streak_reminder_sent_at < daily_last_claimed)''',
                     (window_start, window_end),
                 )
-                rows = c.fetchall()
-            finally:
-                conn.close()
+                return c.fetchall()
+
+            rows = await asyncio.to_thread(db_txn, _fetch_due)
 
             seen_users = set()
             for guild_id, user_id, streak, last_claimed in rows:
                 if user_id in seen_users:
                     continue
                 seen_users.add(user_id)
+
+                # 2026-09-03: this used to send the DM first and mark
+                # streak_reminder_sent_at afterwards, with the failure path
+                # logged at debug level (i.e. invisible). During the sqlite
+                # "database is locked" episodes the mark-sent UPDATE threw, the
+                # DM had already gone out, and the user stayed in the SELECT's
+                # result set -- so every 10min tick re-DMed them for the whole
+                # 3h reminder window. That is the reported "30 DMs in one
+                # night", and why users whose window only partly overlapped the
+                # lock episode got "only a few".
+                # Mark first, send second: if the mark fails we skip the send
+                # entirely, so the worst case is a missed reminder (recoverable
+                # next cycle) instead of an unbounded DM flood.
+                def _mark_sent(conn, user_id=user_id, now=now):
+                    conn.cursor().execute(
+                        'UPDATE users SET streak_reminder_sent_at = ? WHERE user_id = ?',
+                        (now, user_id),
+                    )
+
+                try:
+                    await asyncio.to_thread(db_txn, _mark_sent)
+                except Exception as _me:
+                    logger.warning(
+                        f'daily_streak_reminder: could not mark reminder sent for {user_id}, '
+                        f'skipping DM to avoid duplicate spam: {_me}'
+                    )
+                    continue
+
                 try:
                     user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
                     if not user:
@@ -2394,29 +2473,11 @@ class TasksCog(commands.Cog):
                         color=discord.Color.orange(),
                     )
                     await user.send(embed=embed)
-                    # Mark reminder as sent for this cycle
-                    conn2 = get_db_connection()
-                    try:
-                        c2 = conn2.cursor()
-                        c2.execute(
-                            'UPDATE users SET streak_reminder_sent_at = ? WHERE user_id = ?',
-                            (now, user_id),
-                        )
-                        conn2.commit()
-                    finally:
-                        conn2.close()
                 except discord.Forbidden:
-                    # Can't DM user — mark anyway so we don't retry every 10min
-                    try:
-                        conn3 = get_db_connection()
-                        c3 = conn3.cursor()
-                        c3.execute('UPDATE users SET streak_reminder_sent_at = ? WHERE user_id = ?', (now, user_id))
-                        conn3.commit()
-                        conn3.close()
-                    except Exception:
-                        pass
+                    # Can't DM user — already marked above, nothing to do.
+                    pass
                 except Exception as _e:
-                    logger.debug(f'daily_streak_reminder DM failed for {user_id}: {_e}')
+                    logger.warning(f'daily_streak_reminder DM failed for {user_id}: {_e}')
         except Exception as e:
             logger.error(f'daily_streak_reminder error: {e}', exc_info=True)
 

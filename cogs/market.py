@@ -74,7 +74,7 @@ class MarketCog(commands.Cog):
         await interaction.response.defer(ephemeral=False)
 
         # Check if player is softlocked
-        is_softlocked, upgrade_level = is_player_softlocked(interaction.guild_id, interaction.user.id)
+        is_softlocked, upgrade_level = await asyncio.to_thread(is_player_softlocked, interaction.guild_id, interaction.user.id)
         if is_softlocked:
             next_upgrade_level = upgrade_level + 1
             upgrade_cost = DRAGONNEST_UPGRADES.get(next_upgrade_level, {}).get('cost', 0)
@@ -1039,7 +1039,7 @@ class MarketCog(commands.Cog):
         await interaction.response.defer(ephemeral=False)
 
         # Check if player is softlocked
-        is_softlocked, upgrade_level = is_player_softlocked(interaction.guild_id, interaction.user.id)
+        is_softlocked, upgrade_level = await asyncio.to_thread(is_player_softlocked, interaction.guild_id, interaction.user.id)
         if is_softlocked:
             next_upgrade_level = upgrade_level + 1
             upgrade_cost = DRAGONNEST_UPGRADES.get(next_upgrade_level, {}).get('cost', 0)
@@ -1449,7 +1449,7 @@ class MarketCog(commands.Cog):
         await interaction.response.defer(ephemeral=False)
 
         # Check if player is softlocked
-        is_softlocked, upgrade_level = is_player_softlocked(interaction.guild_id, interaction.user.id)
+        is_softlocked, upgrade_level = await asyncio.to_thread(is_player_softlocked, interaction.guild_id, interaction.user.id)
         if is_softlocked:
             next_upgrade_level = upgrade_level + 1
             upgrade_cost = DRAGONNEST_UPGRADES.get(next_upgrade_level, {}).get('cost', 0)

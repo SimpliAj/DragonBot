@@ -26,6 +26,18 @@ def get_spawn_lock(guild_id: int):
 # Track last catch attempt for mock messaging
 last_catch_attempts = {}  # {guild_id: {'user_id': user_id, 'timestamp': time, 'username': name}}
 
+# ==================== GATEWAY LIVENESS (watchdog input) ====================
+# 'last_ok' is refreshed by a 20s task loop, but only while the gateway is
+# connected -- so a stale value means EITHER the gateway is down OR the event
+# loop is wedged. The watchdog thread in main.py reads it from outside asyncio
+# and restarts the process if it stops advancing. See main.py for the incident
+# this exists to prevent (2026-09-01, 8h23m offline with pm2 showing "online").
+gateway_state = {
+    'connected': False,
+    'ever_connected': False,
+    'last_ok': 0.0,
+}
+
 # ==================== ACTIVE EVENTS ====================
 # Dragonscale events (server-wide spawn boosts)
 active_dragonscales = {}        # {guild_id: end_timestamp}

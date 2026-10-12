@@ -235,7 +235,7 @@ class EconomyCog(commands.Cog):
             'boost_dragonscale':             {'name': 'Dragonscale (2min)', 'price': 20000,  'emoji': '<:dragonscale:1446278170998341693>', 'duration': 120},
             'boost_premium':                 {'name': 'Dragonscale (10min)','price': 200000, 'emoji': '<:dragonscale:1446278170998341693>', 'duration': 600},
             'item_luckycharm':               {'name': 'Lucky Charm',        'price': 25000,  'emoji': '🍀'},
-            'item_dna':                      {'name': 'DNA Sample',         'price': 20000,  'emoji': '🧬'},
+            'item_dna':                      {'name': 'DNA Sample',         'price': 12500,  'emoji': '🧬'},
             'usable_night_vision':           {'name': 'Night Vision',       'price': 75000,  'emoji': '🌙'},
             'usable_lucky_dice':             {'name': 'Lucky Dice',         'price': 10000,  'emoji': '🎰'},
             'usable_gold_rush':              {'name': 'Gold Rush',          'price': 15000,  'emoji': '✨'},
@@ -285,12 +285,12 @@ class EconomyCog(commands.Cog):
                 'lines': [
                     '🍀 **Lucky Charm** — 25,000 🪙',
                     '   └─ 2x Catch Rate for 30 min — activate in `/inventory`',
-                    '🧬 **DNA Sample** — 20,000 🪙',
+                    '🧬 **DNA Sample** — 12,500 🪙',
                     '   └─ Clone any dragon you own when breeding',
                 ],
                 'options': [
                     discord.SelectOption(label="Lucky Charm", description="25,000 🪙 - 2x catch 30min", emoji="🍀", value="item_luckycharm"),
-                    discord.SelectOption(label="DNA Sample",  description="20,000 🪙 - Clone a dragon", emoji="🧬", value="item_dna"),
+                    discord.SelectOption(label="DNA Sample",  description="12,500 🪙 - Clone a dragon", emoji="🧬", value="item_dna"),
                 ],
             },
             'active': {

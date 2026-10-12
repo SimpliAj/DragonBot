@@ -21,7 +21,7 @@ from config import (
     ERROR_WEBHOOK_URL, LEVEL_NAMES, PACK_TYPES,
 )
 from achievements import award_trophy, check_and_award_achievements, send_quest_notification, award_specific_achievement
-from database import get_user, get_user_async, init_db, is_player_softlocked, update_balance, update_balance_and_check_trophies, get_db_connection, get_server_config
+from database import get_user, get_user_async, init_db, is_player_softlocked, update_balance, update_balance_and_check_trophies, get_db_connection, get_server_config, db_txn
 from state import (
     active_dragonscales, active_dragonfest, active_luckycharms,
     active_spawns, active_usable_items, dragonscale_event_starts,
@@ -41,10 +41,21 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+from state import gateway_state
+
+
+def _mark_gateway_up():
+    """Record that the Discord gateway is up right now (watchdog input)."""
+    gateway_state['connected'] = True
+    gateway_state['ever_connected'] = True
+    gateway_state['last_ok'] = time.time()
+
+
+
 async def spawn_dragon(guild_id: int, channel, bot=None, catcher_id: int = None):
     """Spawn a dragon in the channel"""
     # Check if raid boss is active - block dragon spawns during raid
-    if is_raid_boss_active(guild_id):
+    if await asyncio.to_thread(is_raid_boss_active, guild_id):
         return  # Don't spawn dragons during raid boss
 
     # Check if there's already an active spawn
@@ -76,23 +87,24 @@ async def spawn_dragon(guild_id: int, channel, bot=None, catcher_id: int = None)
     base_coin_reward = max(2, int(dragon_data['value'] / 2))
 
     # Apply server-wide Alpha coin boost for display
+    # 2026-09-03: ran on the event loop, up to 5 sequential attempts, each able
+    # to block for the full busy_timeout -> a single spawn could freeze the bot.
+    # Off-loaded to a worker thread.
+    def _alpha_count(conn, guild_id=guild_id):
+        c = conn.cursor()
+        c.execute('SELECT COUNT(*) FROM user_alphas WHERE guild_id = ?', (guild_id,))
+        return c.fetchone()[0]
+
     server_alpha_count = 0
     for _attempt in range(5):
-        _ac = None
         try:
-            _ac = get_db_connection()
-            c = _ac.cursor()
-            c.execute('SELECT COUNT(*) FROM user_alphas WHERE guild_id = ?', (guild_id,))
-            server_alpha_count = c.fetchone()[0]
+            server_alpha_count = await asyncio.to_thread(db_txn, _alpha_count)
             break
         except Exception as _e:
             if _attempt < 4:
                 await asyncio.sleep(0.5 * (_attempt + 1))
             else:
                 logger.warning(f"[spawn] alpha count failed after 5 retries: {_e}")
-        finally:
-            if _ac:
-                _ac.close()
 
     displayed_coins = base_coin_reward
     if server_alpha_count > 0:
@@ -1030,6 +1042,21 @@ class EventsCog(commands.Cog):
         await cleanup_old_messages()
 
         logger.info(f'Dragon Bot ready! Serving {len(self.bot.guilds)} servers')
+        _mark_gateway_up()
+
+    # ==================== GATEWAY LIVENESS ====================
+    # Feeds the watchdog thread started in main.py. See state.gateway_state.
+    @commands.Cog.listener()
+    async def on_connect(self):
+        _mark_gateway_up()
+
+    @commands.Cog.listener()
+    async def on_resumed(self):
+        _mark_gateway_up()
+
+    @commands.Cog.listener()
+    async def on_disconnect(self):
+        gateway_state['connected'] = False
 
     @commands.Cog.listener()
     async def on_app_command_error(self, interaction: discord.Interaction, error: Exception):
@@ -1073,6 +1100,26 @@ class EventsCog(commands.Cog):
                 )
         except Exception as e:
             logger.error(f"Failed to send error message to user: {e}")
+
+    @commands.Cog.listener()
+    async def on_command_error(self, ctx, error):
+        """Global error handler for prefix commands. The bot is entirely
+        slash-command based (see main.py's extensions -- no @commands.command
+        is registered anywhere), but Bot(command_prefix='/') still runs the
+        prefix dispatcher on every message. Since Discord's own slash-command
+        UI sends '/' as the invocation itself, any user typing a plain "/word"
+        chat message (or a stale/typo'd slash-command guess) reaches this as
+        CommandNotFound and, with no handler here, discord.py's default
+        behavior logs it as an ERROR -- 2026-09-27 investigation found ~8 of
+        these in one day of logs (confirm, confirm_track, pf, Question),
+        none of them real bugs, just chat noise misclassified as an error.
+        Silently ignore CommandNotFound; still log/report anything else the
+        same way on_app_command_error does, in case a real prefix command
+        ever throws.
+        """
+        if isinstance(error, commands.CommandNotFound):
+            return
+        logger.error(f"Prefix command error: {error}", exc_info=error)
 
     @commands.Cog.listener()
     async def on_error(self, event, *args, **kwargs):
@@ -1232,7 +1279,7 @@ class EventsCog(commands.Cog):
                 if len(dragon_chars & msg_chars) >= 5:
                     is_typo = True
 
-        _cfg = get_server_config(guild_id)
+        _cfg = await asyncio.to_thread(get_server_config, guild_id)
         if is_typo and _cfg.get('chat_responses_enabled', 1) and guild_id in spawn_channels and spawn_channels[guild_id] == message.channel.id:
             mock_messages = [
                 f"🤡 Did you just try to type 'dragon'? You wrote '{message.content}' LMAO",
@@ -1278,7 +1325,7 @@ class EventsCog(commands.Cog):
                 return
 
             # Check if player is softlocked
-            is_softlocked, upgrade_level = is_player_softlocked(guild_id, message.author.id)
+            is_softlocked, upgrade_level = await asyncio.to_thread(is_player_softlocked, guild_id, message.author.id)
             if is_softlocked:
                 next_upgrade_level = upgrade_level + 1
                 upgrade_cost = DRAGONNEST_UPGRADES.get(next_upgrade_level, {}).get('cost', 0)
@@ -1299,7 +1346,19 @@ class EventsCog(commands.Cog):
             # Use async spawn lock to prevent race conditions when multiple users catch simultaneously
             from state import get_spawn_lock
             spawn_lock = get_spawn_lock(guild_id)
+            # 2026-09-03: this lock is held across the whole (long, DB-heavy,
+            # Discord-API-heavy) catch handler. If it ever stays held, every
+            # later `dragon` in that guild silently hangs forever and the guild
+            # looks like "the bot won't let us catch the dragon". Make that
+            # visible instead of invisible.
+            _lock_t0 = time.monotonic()
             async with spawn_lock:
+                _lock_wait = time.monotonic() - _lock_t0
+                if _lock_wait > 5:
+                    logger.error(
+                        f'[catch] guild {guild_id}: waited {_lock_wait:.1f}s for spawn lock '
+                        f'(user {message.author.id}) — event loop or DB stall'
+                    )
                 # Double-check spawn still exists after acquiring lock
                 if guild_id not in active_spawns:
                     current_time = time.time()
@@ -1326,7 +1385,7 @@ class EventsCog(commands.Cog):
 
                     # Anti-double catch check
                     try:
-                        _adc_cfg = get_server_config(guild_id)
+                        _adc_cfg = await asyncio.to_thread(get_server_config, guild_id)
                         if _adc_cfg.get('anti_double_catch'):
                             _dragonfest = active_dragonfest.get(guild_id)
                             _fest_active = _dragonfest and (
@@ -1354,30 +1413,40 @@ class EventsCog(commands.Cog):
 
                     del active_spawns[guild_id]
 
-                    conn_catch = None
-                    try:
-                        conn_catch = get_db_connection()
-                        c_catch = conn_catch.cursor()
+                    # 2026-09-03: dragon_key/dragon_data used to be bound AFTER
+                    # this block but referenced inside it -> UnboundLocalError on
+                    # every single catch, swallowed by a bare `except: pass`, so
+                    # conn_catch.commit() never ran. Result: last_spawn_time was
+                    # never updated, the active_dragon_spawns row was never
+                    # deleted (guilds got permanently blocked from new spawns
+                    # after a restart re-loaded the stale row) and
+                    # dragon_catch_log stayed at 0 rows forever despite 32k
+                    # spawns. Bind them first, and log failures instead of
+                    # silently swallowing them.
+                    dragon_key = spawn_data['dragon_type']
+                    dragon_data = DRAGON_TYPES[dragon_key]
+
+                    # 2026-09-03: off the event loop -- this is the hottest write
+                    # path in the bot (every catch, every guild).
+                    def _catch_txn(conn, guild_id=guild_id, uid=message.author.id, dk=dragon_key):
+                        ts = int(time.time())
+                        c_catch = conn.cursor()
                         c_catch.execute('UPDATE spawn_config SET last_spawn_time = ? WHERE guild_id = ?',
-                                      (int(time.time()), guild_id))
+                                        (ts, guild_id))
                         c_catch.execute('DELETE FROM active_dragon_spawns WHERE guild_id = ?', (guild_id,))
                         c_catch.execute('INSERT INTO dragon_catch_log (guild_id, user_id, dragon_type, caught_at) VALUES (?, ?, ?, ?)',
-                                      (guild_id, message.author.id, dragon_key, int(time.time())))
-                        conn_catch.commit()
-                    except:
-                        pass
-                    finally:
-                        if conn_catch:
-                            conn_catch.close()
+                                        (guild_id, uid, dk, ts))
+
+                    try:
+                        await asyncio.to_thread(db_txn, _catch_txn)
+                    except Exception as _cc_err:
+                        logger.error(f'[catch] failed to persist catch bookkeeping for guild {guild_id}: {_cc_err}')
 
                     last_catch_attempts[guild_id] = {
                         'user_id': message.author.id,
                         'timestamp': time.time(),
                         'username': message.author.display_name
                     }
-
-                    dragon_key = spawn_data['dragon_type']
-                    dragon_data = DRAGON_TYPES[dragon_key]
                     item_boost_message = ""
                     _catch_embed_sent = False
                     _conn_nest = None
@@ -1425,7 +1494,7 @@ class EventsCog(commands.Cog):
                         final_amount = apply_items(guild_id, message.author.id, final_amount)
     
                         # Apply Knowledge Book passive bonus (+2% catch per book)
-                        knowledge_bonus = get_passive_bonus(guild_id, message.author.id, 'catch')
+                        knowledge_bonus = await asyncio.to_thread(get_passive_bonus, guild_id, message.author.id, 'catch')
                         if knowledge_bonus > 0:
                             final_amount = int(final_amount * (1 + knowledge_bonus))
                             perks_applied.append(f"📚 Knowledge Book (+{int(knowledge_bonus*100)}% boost)")
@@ -1938,15 +2007,28 @@ class EventsCog(commands.Cog):
                         if has_active_dragonscale or has_dragonfest or has_premium:
                             await spawn_dragon(guild_id, message.channel, self.bot)
     
+                            # 2026-09-03: conn_update.close() sat after commit()
+                            # with a bare `except: pass` -- when commit() raised
+                            # "database is locked" the close was skipped and this
+                            # connection leaked while still holding an
+                            # uncommitted write transaction, i.e. it kept the
+                            # sqlite write lock for the whole remaining lifetime
+                            # of this on_message frame and blocked every other
+                            # writer in the bot. Same leak shape as the
+                            # 2026-05-21 tasks.py/events.py fixes.
+                            # 2026-09-03: db_txn guarantees the close that the old
+                            # bare `except: pass` skipped on a locked commit
+                            # (that leak held the sqlite write lock and blocked
+                            # every other writer); to_thread keeps it off the loop.
+                            def _spawn_ts_txn(conn, guild_id=guild_id):
+                                conn.cursor().execute(
+                                    'UPDATE spawn_config SET last_spawn_time = ? WHERE guild_id = ?',
+                                    (int(time.time()), guild_id))
+
                             try:
-                                conn_update = get_db_connection()
-                                c_update = conn_update.cursor()
-                                c_update.execute('UPDATE spawn_config SET last_spawn_time = ? WHERE guild_id = ?',
-                                              (int(time.time()), guild_id))
-                                conn_update.commit()
-                                conn_update.close()
-                            except:
-                                pass
+                                await asyncio.to_thread(db_txn, _spawn_ts_txn)
+                            except Exception as _cu_err:
+                                logger.error(f'[catch] spawn_config update failed for guild {guild_id}: {_cu_err}')
     
                     except Exception as _catch_err:
                         logger.error(f"[catch] reward processing error: {_catch_err}", exc_info=True)
