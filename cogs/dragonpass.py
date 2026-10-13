@@ -55,7 +55,7 @@ class DragonpassCog(commands.Cog):
                 xp = 0
                 claimed_levels = []
                 season_just_reset = True
-                c.execute('UPDATE dragonpass SET level = 0, xp = 0, claimed_levels = "[]", season = ? WHERE guild_id = ? AND user_id = ?',
+                c.execute('UPDATE OR IGNORE dragonpass SET level = 0, xp = 0, claimed_levels = "[]", season = ? WHERE guild_id = ? AND user_id = ?',
                           (season, interaction.guild_id, interaction.user.id))
                 conn.commit()
             selected_quests = generate_dragonpass_quests(current_time, interaction.guild_id, interaction.user.id)

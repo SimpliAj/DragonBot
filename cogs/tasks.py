@@ -182,6 +182,35 @@ class TasksCog(commands.Cog):
             # "safety net" never actually unstuck anything without a restart.
             # Purge the in-memory entry on the same 24h rule, and reset
             # last_spawn_time so the guild spawns again on the next tick.
+            # 2026-10-13: delete the old spawn message before the row is removed
+            # (max 20 per run to avoid rate limits).
+            def _fetch_stale_rows():
+                conn = get_db_connection()
+                try:
+                    return conn.execute(
+                        "SELECT guild_id, channel_id, message_id FROM active_dragon_spawns "
+                        "WHERE (strftime('%s','now') - spawn_timestamp) > 86400"
+                    ).fetchall()
+                finally:
+                    conn.close()
+            try:
+                stale_rows = await asyncio.to_thread(_fetch_stale_rows)
+            except Exception as e:
+                stale_rows = []
+                logger.error(f"Stale spawn row fetch error: {e}")
+            for _gid, _chid, _mid in stale_rows[:20]:
+                try:
+                    _ch = self.bot.get_channel(_chid)
+                    if _ch is None or not _mid:
+                        continue
+                    _msg = await asyncio.wait_for(_ch.fetch_message(_mid), timeout=10)
+                    await asyncio.wait_for(_msg.delete(), timeout=10)
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException, asyncio.TimeoutError, AttributeError):
+                    pass
+                except Exception as e:
+                    logger.error(f"Stale spawn message delete error guild={_gid}: {e}")
+                await asyncio.sleep(0.5)
+
             stale_cutoff = int(time.time()) - 86400
             stale_guilds = [
                 gid for gid, data in list(active_spawns.items())
@@ -202,7 +231,8 @@ class TasksCog(commands.Cog):
                 c.execute("DELETE FROM active_dragon_spawns WHERE (strftime('%s','now') - spawn_timestamp) > 86400")
                 cleared = c.rowcount
                 for gid in stale_guilds:
-                    c.execute('UPDATE spawn_config SET last_spawn_time = 0 WHERE guild_id = ?', (gid,))
+                    c.execute('UPDATE spawn_config SET last_spawn_time = ? WHERE guild_id = ?',
+                              (int(time.time()) - random.randint(0, 900), gid))
                 return cleared
 
             try:
@@ -1153,6 +1183,27 @@ class TasksCog(commands.Cog):
         """Automatically spawn Black Market with fixed selection: 2 packs, 1 epic+ dragon, 1 random item"""
         current_time = int(time.time())
 
+        if not getattr(self, '_bm_state_loaded', False):
+            self._bm_state_loaded = True
+            try:
+                def _load_bm():
+                    conn = get_db_connection()
+                    try:
+                        conn.execute('CREATE TABLE IF NOT EXISTS black_market_state (guild_id INTEGER PRIMARY KEY, last_end_ts INTEGER, spawns_today INTEGER, last_spawn_day INTEGER)')
+                        conn.commit()
+                        return conn.execute('SELECT guild_id, last_end_ts, spawns_today, last_spawn_day FROM black_market_state').fetchall()
+                    finally:
+                        conn.close()
+                for gid, end_ts, cnt, day in await asyncio.to_thread(_load_bm):
+                    black_market_active.setdefault(gid, {
+                        'end_time': min(int(end_ts or 0), current_time),
+                        'items': [], 'message_id': None,
+                        'spawns_today': int(cnt or 0), 'last_spawn_day': int(day or 0),
+                    })
+                logger.error(f"[BlackMarket] restored cooldown state for {len(black_market_active)} guild(s) from DB")
+            except Exception as e:
+                logger.error(f"[BlackMarket] state restore failed: {e}", exc_info=True)
+
         for guild_id, channel_id in spawn_channels.items():
             # Check server config — black market must be enabled per guild
             from database import get_server_config
@@ -1239,6 +1290,19 @@ class TasksCog(commands.Cog):
                 'spawns_today': prev_count + 1,
                 'last_spawn_day': today_day,
             }
+            logger.error(f"[BlackMarket] SPAWN guild={guild_id} at={time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(current_time))}Z end={end_time} spawns_today={prev_count + 1}")
+            try:
+                def _save_bm(gid=guild_id, e=end_time, n=prev_count + 1, d=today_day):
+                    conn = get_db_connection()
+                    try:
+                        conn.execute('CREATE TABLE IF NOT EXISTS black_market_state (guild_id INTEGER PRIMARY KEY, last_end_ts INTEGER, spawns_today INTEGER, last_spawn_day INTEGER)')
+                        conn.execute('INSERT OR REPLACE INTO black_market_state (guild_id, last_end_ts, spawns_today, last_spawn_day) VALUES (?,?,?,?)', (gid, e, n, d))
+                        conn.commit()
+                    finally:
+                        conn.close()
+                await asyncio.to_thread(_save_bm)
+            except Exception as e:
+                logger.error(f"[BlackMarket] state save failed: {e}", exc_info=True)
 
             guild = self.bot.get_guild(guild_id)
             if guild:

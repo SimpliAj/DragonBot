@@ -37,6 +37,8 @@ class PacksCog(commands.Cog):
     @app_commands.command(name="openpacks", description="Open your packs to get dragons")
     async def openpacks(self, interaction: discord.Interaction):
         """Open packs with 30% chance to upgrade to next tier"""
+        if not interaction.response.is_done():
+            await interaction.response.defer()
 
         # Check if player is softlocked
         is_softlocked, upgrade_level = is_player_softlocked(interaction.guild_id, interaction.user.id)
@@ -52,7 +54,7 @@ class PacksCog(commands.Cog):
                             f"Use `/dragonnest` to upgrade!",
                 color=discord.Color.red()
             )
-            await interaction.response.send_message(embed=softlock_embed, delete_after=5)
+            await interaction.followup.send(embed=softlock_embed, delete_after=5)
             return
 
         conn = get_db_connection()
@@ -63,7 +65,7 @@ class PacksCog(commands.Cog):
         conn.close()
 
         if not packs:
-            await interaction.response.send_message("📦 You don't have any packs to open!", ephemeral=False)
+            await interaction.followup.send("📦 You don't have any packs to open!", ephemeral=False)
             return
 
         # Filter to only include packs with count > 0
@@ -762,7 +764,7 @@ class PacksCog(commands.Cog):
                 )
 
         view = OpenPackView(interaction.guild_id, interaction.user.id, packs)
-        await interaction.response.send_message(embed=embed, view=view)
+        await interaction.followup.send(embed=embed, view=view)
 
     @app_commands.command(name="alphadragons", description="View and craft Alpha Dragons")
     async def alphadragons(self, interaction: discord.Interaction):

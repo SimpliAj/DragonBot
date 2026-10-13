@@ -40,7 +40,11 @@ class AdminCog(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="setchannel", description="Set current channel as dragon spawn channel (Admin only)")
+    @app_commands.guild_only()
     async def setchannel(self, interaction: discord.Interaction):
+        if interaction.guild is None:
+            await interaction.response.send_message("❌ Use this command in a server channel!", ephemeral=True)
+            return
         perms = interaction.user.guild_permissions
         is_owner = interaction.guild is not None and interaction.guild.owner_id == interaction.user.id
         if not (perms.administrator or perms.manage_guild or perms.manage_channels or is_owner):
@@ -543,6 +547,7 @@ async def handle_dev_command(message, command, args):
             'is_dragon': False
         })
 
+        logger.error(f"[BlackMarket] manual black market spawn guild={guild_id} user={getattr(getattr(message, 'author', None), 'id', '?')}")
         end_time = current_time + BLACK_MARKET_DURATION
         black_market_active[guild_id] = {
             'end_time': end_time,

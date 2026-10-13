@@ -1,20 +1,29 @@
 import discord
 from discord.ext import commands
 import os
+import sys
 import asyncio
 import logging
 import threading
 import time
 from dotenv import load_dotenv
 
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
+except Exception:
+    pass
+
 logging.basicConfig(
-    level=logging.ERROR,
+    level=logging.WARNING,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler('bot_errors.log'),
         logging.StreamHandler()
     ]
 )
+logging.getLogger('discord').setLevel(logging.WARNING)
+logging.getLogger('aiohttp.server').setLevel(logging.CRITICAL)
 
 load_dotenv()
 

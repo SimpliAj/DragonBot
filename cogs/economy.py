@@ -692,6 +692,7 @@ class EconomyCog(commands.Cog):
         if not interaction.guild:
             await interaction.response.send_message("❌ Use this command in a server!", ephemeral=True)
             return
+        await interaction.response.defer()
 
         user_data = get_user(interaction.guild_id, interaction.user.id)
         current_time = int(time.time())
@@ -699,7 +700,7 @@ class EconomyCog(commands.Cog):
 
         if current_time - last_claimed < 86400:
             time_left = 86400 - (current_time - last_claimed)
-            await interaction.response.send_message(f"⏰ Daily already claimed! Come back in {format_time_remaining(time_left)}", ephemeral=False)
+            await interaction.followup.send(f"⏰ Daily already claimed! Come back in {format_time_remaining(time_left)}", ephemeral=False)
             return
 
         # Streak logic: breaks if > 48h since last claim (missed a day)
@@ -764,7 +765,7 @@ class EconomyCog(commands.Cog):
             description=desc + streak_reset_warning,
             color=discord.Color.gold()
         )
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
 
     # ==================== VOTE ====================
 
