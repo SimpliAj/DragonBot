@@ -244,7 +244,7 @@ class MarketCog(commands.Cog):
                     'wooden': ('Wooden Pack', '<:woodenchest:1446170002708238476>'),
                     'stone': ('Stone Pack', '<:stonechest:1446169958265389247>'),
                     'bronze': ('Bronze Pack', '<:bronzechest:1446169758599745586>'),
-                    'silver': ('Silver Pack', '<:silverchest:1446169917996011520>'),
+                    'silver': ('Silver Pack', '<:silverdragon2:1508178716344455169>'),
                     'gold': ('Gold Pack', '<:goldchest:1446169876438978681>'),
                     'platinum': ('Platinum Pack', '<:platinumchest:1446169876438978681>'),
                     'diamond': ('Diamond Pack', '<:diamondchest:1446169830720929985>'),
@@ -412,7 +412,7 @@ class MarketCog(commands.Cog):
                         }
                         pack_emojis_map = {
                             'wooden': '<:woodenchest:1446170002708238476>', 'stone': '<:stonechest:1446169958265389247>',
-                            'bronze': '<:bronzechest:1446169758599745586>', 'silver': '<:silverchest:1446169917996011520>',
+                            'bronze': '<:bronzechest:1446169758599745586>', 'silver': '<:silverdragon2:1508178716344455169>',
                             'gold': '<:goldchest:1446169876438978681>', 'platinum': '<:platinumchest:1446169876438978681>',
                             'diamond': '<:diamondchest:1446169830720929985>', 'celestial': '<:celestialchest:1446169830720929985>'
                         }
@@ -644,7 +644,7 @@ class MarketCog(commands.Cog):
                     }
                     pack_emojis = {
                         'wooden': '<:woodenchest:1446170002708238476>', 'stone': '<:stonechest:1446169958265389247>',
-                        'bronze': '<:bronzechest:1446169758599745586>', 'silver': '<:silverchest:1446169917996011520>',
+                        'bronze': '<:bronzechest:1446169758599745586>', 'silver': '<:silverdragon2:1508178716344455169>',
                         'gold': '<:goldchest:1446169876438978681>', 'platinum': '<:platinumchest:1446169876438978681>',
                         'diamond': '<:diamondchest:1446169830720929985>', 'celestial': '<:celestialchest:1446169830720929985>'
                     }
@@ -827,7 +827,7 @@ class MarketCog(commands.Cog):
                                             }
                                             pack_emojis_map = {
                                                 'wooden': '<:woodenchest:1446170002708238476>', 'stone': '<:stonechest:1446169958265389247>',
-                                                'bronze': '<:bronzechest:1446169758599745586>', 'silver': '<:silverchest:1446169917996011520>',
+                                                'bronze': '<:bronzechest:1446169758599745586>', 'silver': '<:silverdragon2:1508178716344455169>',
                                                 'gold': '<:goldchest:1446169876438978681>', 'platinum': '<:platinumchest:1446169876438978681>',
                                                 'diamond': '<:diamondchest:1446169830720929985>', 'celestial': '<:celestialchest:1446169830720929985>'
                                             }
@@ -1147,7 +1147,7 @@ class MarketCog(commands.Cog):
         }
         pack_emojis = {
             'wooden': '<:woodenchest:1446170002708238476>', 'stone': '<:stonechest:1446169958265389247>',
-            'bronze': '<:bronzechest:1446169758599745586>', 'silver': '<:silverchest:1446169917996011520>',
+            'bronze': '<:bronzechest:1446169758599745586>', 'silver': '<:silverdragon2:1508178716344455169>',
             'gold': '<:goldchest:1446169876438978681>', 'platinum': '<:platinumchest:1446169876438978681>',
             'diamond': '<:diamondchest:1446169830720929985>', 'celestial': '<:celestialchest:1446169830720929985>'
         }
@@ -1529,7 +1529,7 @@ class MarketCog(commands.Cog):
         }
         pack_emojis = {
             'wooden': '<:woodenchest:1446170002708238476>', 'stone': '<:stonechest:1446169958265389247>',
-            'bronze': '<:bronzechest:1446169758599745586>', 'silver': '<:silverchest:1446169917996011520>',
+            'bronze': '<:bronzechest:1446169758599745586>', 'silver': '<:silverdragon2:1508178716344455169>',
             'gold': '<:goldchest:1446169876438978681>', 'platinum': '<:platinumchest:1446169876438978681>',
             'diamond': '<:diamondchest:1446169830720929985>', 'celestial': '<:celestialchest:1446169830720929985>'
         }

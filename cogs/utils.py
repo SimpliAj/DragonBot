@@ -587,10 +587,28 @@ def check_dragonpass_quests(guild_id: int, user_id: int, action_type: str, amoun
 
 
 # ==================== RANDOM DRAGON SELECTION ====================
+_LUCKY_HOUR_RARITIES = {'rare', 'epic', 'legendary', 'mythic', 'ultra'}
+
 def get_random_dragon():
-    """Get random dragon based on catch_weight."""
+    """Get random dragon based on catch_weight. Doubles Rare+ weights during Lucky Hour."""
+    import time as _time
+    from state import lucky_hour
+    from config import DRAGON_RARITY_TIERS
+
+    rare_plus = set()
+    for r in _LUCKY_HOUR_RARITIES:
+        rare_plus.update(DRAGON_RARITY_TIERS.get(r, []))
+
+    lh_active = lucky_hour['active'] and lucky_hour['ends_at'] > int(_time.time())
+
     dragons = list(DRAGON_TYPES.items())
-    weights = [d[1]['catch_weight'] for d in dragons]
+    weights = []
+    for key, data in dragons:
+        w = data['catch_weight']
+        if lh_active and key in rare_plus:
+            w *= 2
+        weights.append(w)
+
     dragon_key = random.choices(dragons, weights=weights)[0][0]
     return dragon_key, DRAGON_TYPES[dragon_key]
 

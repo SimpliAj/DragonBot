@@ -238,7 +238,7 @@ class DragonpassCog(commands.Cog):
             'wooden': {'closed': '<:woodenchest:1446170002708238476>', 'open': '✅'},
             'stone': {'closed': '<:stonechest:1446169958265389247>', 'open': '✅'},
             'bronze': {'closed': '<:bronzechest:1446169758599745586>', 'open': '✅'},
-            'silver': {'closed': '<:silverchest:1446169917996011520>', 'open': '✅'},
+            'silver': {'closed': '<:silverdragon2:1508178716344455169>', 'open': '✅'},
             'gold': {'closed': '<:goldchest:1446169876438978681>', 'open': '✅'},
             'diamond': {'closed': '<:diamondchest:1446169830720929985>', 'open': '✅'}
         }
@@ -603,7 +603,7 @@ class DragonpassCog(commands.Cog):
                     'wooden': {'closed': '<:woodenchest:1446170002708238476>', 'open': '✅'},
                     'stone': {'closed': '<:stonechest:1446169958265389247>', 'open': '✅'},
                     'bronze': {'closed': '<:bronzechest:1446169758599745586>', 'open': '✅'},
-                    'silver': {'closed': '<:silverchest:1446169917996011520>', 'open': '✅'},
+                    'silver': {'closed': '<:silverdragon2:1508178716344455169>', 'open': '✅'},
                     'gold': {'closed': '<:goldchest:1446169876438978681>', 'open': '✅'},
                     'diamond': {'closed': '<:diamondchest:1446169830720929985>', 'open': '✅'}
                 }

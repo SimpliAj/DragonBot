@@ -67,6 +67,9 @@ ritual_active = {}              # {guild_id: bool}
 # Last spawn data (for debugging / dev commands)
 last_spawn_data = {}            # {guild_id: {...}}
 
+# Lucky Hour event (global, all servers)
+lucky_hour = {'active': False, 'ends_at': 0}  # ends_at = unix timestamp
+
 # ==================== RAID BOSS CONFIG ====================
 RARITY_DAMAGE = {
     'common': 10,

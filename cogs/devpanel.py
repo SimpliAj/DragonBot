@@ -288,6 +288,46 @@ class FixSoftlockModal(discord.ui.Modal, title="Fix Softlock"):
             await interaction.followup.send(f"❌ Error: {e}", ephemeral=True)
 
 
+class LuckyHourModal(discord.ui.Modal, title="Start Lucky Hour"):
+    duration = discord.ui.TextInput(label="Duration (minutes)", placeholder="e.g. 60", default="60")
+
+    def __init__(self, bot): super().__init__(); self.bot = bot
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        from state import lucky_hour, spawn_channels
+        import time as _time
+        try:
+            minutes = int(self.duration.value)
+            if minutes < 5 or minutes > 240:
+                await interaction.followup.send("❌ Duration must be 5–240 minutes.", ephemeral=True)
+                return
+        except ValueError:
+            await interaction.followup.send("❌ Invalid number.", ephemeral=True)
+            return
+
+        ends_at = int(_time.time()) + minutes * 60
+        lucky_hour['active'] = True
+        lucky_hour['ends_at'] = ends_at
+
+        # Announce in all spawn channels
+        announce_embed = discord.Embed(
+            title="⭐ Lucky Hour has started!",
+            description=f"Rare, Epic, Legendary, Mythic & Ultra dragons spawn **2× more often** for the next **{minutes} minutes**!\n\nCatch fast! 🐉",
+            color=discord.Color.gold()
+        )
+        count = 0
+        for guild_id, channel_id in list(spawn_channels.items()):
+            try:
+                ch = self.bot.get_channel(channel_id)
+                if ch:
+                    await ch.send(embed=announce_embed)
+                    count += 1
+            except Exception:
+                pass
+        await interaction.followup.send(f"✅ Lucky Hour started for {minutes}min! Announced in {count} channels.", ephemeral=True)
+
+
 class SetStatusModal(discord.ui.Modal, title="Set Bot Status"):
     activity_text = discord.ui.TextInput(
         label="Activity Text",
@@ -607,6 +647,16 @@ class SpawnView(discord.ui.View):
     async def kill_raid(self, i, _):
         await i.response.defer(ephemeral=True)
         await _run(i, self.bot, 'raidkill', [])
+
+    @discord.ui.button(label="Lucky Hour", emoji="⭐", style=discord.ButtonStyle.success, row=1)
+    async def lucky_hour(self, i, _): await i.response.send_modal(LuckyHourModal(self.bot))
+
+    @discord.ui.button(label="Stop Lucky Hour", emoji="🛑", style=discord.ButtonStyle.danger, row=1)
+    async def stop_lucky_hour(self, i, _):
+        from state import lucky_hour
+        lucky_hour['active'] = False
+        lucky_hour['ends_at'] = 0
+        await i.response.send_message("✅ Lucky Hour stopped.", ephemeral=True)
 
     @discord.ui.button(label="← Back", style=discord.ButtonStyle.gray, row=1)
     async def back(self, i, _):
